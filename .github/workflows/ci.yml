@@ -62,6 +62,16 @@ jobs:
           PYTHONHASHSEED: "0"
         run: python -m pocketsec.stage0.cli gate
 
+      - name: Stage 1 acceptance gate
+        env:
+          PYTHONHASHSEED: "0"
+        run: python -m pocketsec.stage1.cli gate
+
+      - name: Stage 1 adversarial representation suite
+        env:
+          PYTHONHASHSEED: "0"
+        run: python -m pocketsec.stage1.cli adversarial
+
       - name: Smoke benchmark (H0 baseline through the harness)
         env:
           PYTHONHASHSEED: "0"

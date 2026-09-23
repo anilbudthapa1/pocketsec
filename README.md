@@ -12,18 +12,23 @@ RAM. Not a chatbot, not a generic anomaly detector.
 
 ## Status
 
-**Stage 0 — Fundamental Architecture Discovery: implemented, gate passing.**
-Stages 1–12 are architecture documents only; no implementation is claimed.
+- **Stage 0 — Fundamental Architecture Discovery:** implemented, gate passing.
+- **Stage 1 — SSIR + Security State:** implemented, gate passing, with the
+  D1.13 field freeze explicitly **incomplete** (see below).
+- **Stages 2–12:** architecture documents only; no implementation is claimed.
+
 `planning/PROGRESS.md` is the authoritative ledger — documentation existing is
 never evidence that code exists.
 
 ## Quick start
 
 ```bash
-python -m pocketsec.stage0.cli gate     # Stage 0 acceptance gate (exit 0 = pass)
-python -m pocketsec.stage0.cli smoke    # H0 baseline through the benchmark harness
-python -m pocketsec.stage0.cli env      # reproducibility fingerprint
-PYTHONHASHSEED=0 python -m pytest -q    # test suite
+python -m pocketsec.stage0.cli gate         # Stage 0 gate (exit 0 = pass)
+python -m pocketsec.stage0.cli smoke        # H0 baseline through the harness
+python -m pocketsec.stage1.cli gate         # Stage 1 gate, 13 criteria
+python -m pocketsec.stage1.cli adversarial  # 8 adversarial representation tests
+python -m pocketsec.stage1.cli guillotine   # measured representation frontier
+PYTHONHASHSEED=0 python -m pytest -q        # test suite
 ```
 
 The runtime has **zero** third-party dependencies (ADR-0001), so the first three
@@ -63,6 +68,35 @@ These are not prose commitments; each one fails a test or the gate if broken.
   explicitly and it travels with the result.
 - **Nothing is deleted.** The experiment ledger is append-only and
   digest-chained; refuted experiments and counterexamples stay.
+
+## What Stage 1 added
+
+SSIR — the Security Semantic Intermediate Representation — plus the security
+state calculus. The fundamental unit is a **transition, not a log line**:
+τ = (A, R, O, ΔS, U, N, P, T, E). See `docs/stage-1-ssir-spec.md`.
+
+Measured on the synthetic corpus: cross-sensor equivalence 20/20 between eBPF
+and auditd paths, peak RSS 24.6 MB against the 100 MB Edge target, Φ separating
+benign 0.62 from malicious 9.46 with a +4.75 composition gain over an additive
+severity control, and 8/8 adversarial representation tests passing.
+
+Three more invariants enforced in code:
+
+- **Novelty, security potential and confidence stay three separate signals.**
+  A novel benign build scores novelty 1.00 / Φ 0.75. Rare is not malicious.
+- **An epoch needs corroborating system-change evidence.** Behavioural novelty
+  alone can never open one — that is the whole anti-poisoning mechanism.
+- **Semantics are earned by behaviour.** Renaming a binary to `/tmp/.x91`
+  produces an identical Φ of 13.75.
+
+## An honest note on the Stage 1 numbers
+
+The Information Guillotine frontier is **degenerate** on the current corpus:
+only 1 of 9 cuts measurably costs security retention, because the synthetic
+scenarios are separable by too many redundant signals. The report says so
+itself (`ParetoReport.degenerate`), and **the 11-byte knee must not be used to
+justify dropping SSIR fields.** The D1.13 field freeze stays open until a harder
+corpus exists.
 
 ## An honest note on the Stage 0 numbers
 

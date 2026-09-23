@@ -1,7 +1,11 @@
 {
   "ledger_version": "1.0.0",
   "policy": "No novelty claim without literature review, and before publication or patenting, a patent/prior-art review. An entry may only be marked REVIEWED when it actually cites related work. Every hypothesis in pocketsec.stage0.hypotheses must appear here.",
-  "status_values": ["NOT_REVIEWED", "IN_PROGRESS", "REVIEWED"],
+  "status_values": [
+    "NOT_REVIEWED",
+    "IN_PROGRESS",
+    "REVIEWED"
+  ],
   "entries": [
     {
       "hypothesis_id": "H0",
@@ -25,7 +29,7 @@
       "literature_status": "NOT_REVIEWED",
       "patent_status": "NOT_REVIEWED",
       "related_work": [],
-      "notes": "Overlaps heavily with automata learning, grammatical inference and state minimisation. Must be reviewed before any novelty language is used anywhere in the project."
+      "notes": "Overlaps heavily with automata learning, grammatical inference and state minimisation. Stage 1 added ordered capability lattices and a compositional \u03a6; both are conventional constructions and NO novelty is claimed. Must be reviewed before any novelty language is used anywhere in the project."
     },
     {
       "hypothesis_id": "H3",
@@ -65,7 +69,7 @@
       "literature_status": "NOT_REVIEWED",
       "patent_status": "NOT_REVIEWED",
       "related_work": [],
-      "notes": "Substantial existing work in provenance-graph intrusion detection. Review before any comparative claim."
+      "notes": "Substantial existing work in provenance-graph intrusion detection. Stage 1 implements a relational entity/relation encoding (SSIR) plus a lineage-scoped state calculus; NO novelty is claimed for either. Review before any comparative claim. See ADR-0005, ADR-0006."
     },
     {
       "hypothesis_id": "H8",

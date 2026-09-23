@@ -19,6 +19,7 @@ dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
 
 [project.scripts]
 pocketsec-stage0 = "pocketsec.stage0.cli:main"
+pocketsec-stage1 = "pocketsec.stage1.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["pocketsec*"]
