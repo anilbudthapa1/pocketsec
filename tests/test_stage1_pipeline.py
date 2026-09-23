@@ -122,7 +122,8 @@ def test_unseen_techniques_are_absent_from_training() -> None:
 
 
 def test_guillotine_produces_a_measured_frontier() -> None:
-    report = run_guillotine(Stage1GateContext.build().results)
+    ctx = Stage1GateContext.build()
+    report = run_guillotine(ctx.guillotine_score, train=ctx.guillotine_fit)
     assert report.is_measured_frontier
     assert len(report.points) == len(ABLATIONS) + 1
     costs = [p.bytes_per_transition for p in report.points]
@@ -130,7 +131,8 @@ def test_guillotine_produces_a_measured_frontier() -> None:
 
 
 def test_guillotine_knee_is_cheaper_than_the_full_representation() -> None:
-    report = run_guillotine(Stage1GateContext.build().results)
+    ctx = Stage1GateContext.build()
+    report = run_guillotine(ctx.guillotine_score, train=ctx.guillotine_fit)
     assert report.knee is not None
     assert report.knee.bytes_per_transition <= report.baseline.bytes_per_transition
 
@@ -237,6 +239,7 @@ def test_guillotine_cli_emits_json(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["--json", "guillotine"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["is_measured_frontier"] is True
+    assert payload["held_out"] is True
 
 
 def test_replay_cli_reports_bounded_memory(capsys: pytest.CaptureFixture[str]) -> None:
@@ -259,18 +262,27 @@ def test_guillotine_reports_its_own_degeneracy() -> None:
     field-selection result would be exactly the "optimise for byte count at the
     expense of unmeasured security loss" the Stage 1 non-goals forbid.
     """
-    report = run_guillotine(Stage1GateContext.build().results)
-    assert isinstance(report.degenerate, bool)
-    assert report.caveat
-    if report.degenerate:
-        assert "must NOT be used" in report.caveat
-        assert report.informative_cuts <= 1
+    ctx = Stage1GateContext.build()
+
+    # Fitted and scored on the same split: the more serious problem, so it
+    # takes precedence in the caveat.
+    optimistic = run_guillotine(ctx.results)
+    assert not optimistic.held_out
+    assert "OPTIMISTIC" in optimistic.caveat
+
+    # Held out, so degeneracy is the thing left to report.
+    held_out = run_guillotine(ctx.guillotine_score, train=ctx.guillotine_fit)
+    assert held_out.held_out
+    assert held_out.caveat
+    if held_out.degenerate:
+        assert "must NOT be used" in held_out.caveat
+        assert held_out.informative_cuts <= 1
 
 
 def test_guillotine_detects_an_informative_frontier() -> None:
     """The degeneracy detector must not simply always fire."""
     ctx = Stage1GateContext.build()
-    report = run_guillotine(ctx.results)
+    report = run_guillotine(ctx.guillotine_score, train=ctx.guillotine_fit)
     # Removing the last family always costs retention on this corpus, so at
     # least one informative cut must be detected.
     assert report.informative_cuts >= 1

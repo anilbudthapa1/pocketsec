@@ -31,6 +31,11 @@ from pocketsec.stage0.benchmark.security_metrics import (
     confusion_at_threshold,
     recall_at_max_fpr,
 )
+from pocketsec.stage1.guillotine.features import (
+    LogisticProbe,
+    extract_features,
+    feature_names,
+)
 from pocketsec.stage1.pipeline import ScenarioResult
 from pocketsec.stage1.ssir.codec import LAYOUTS, SSIRCodec
 from pocketsec.stage1.ssir.transition import RepresentationLevel
@@ -140,9 +145,20 @@ class AblationResult:
 class ParetoReport:
     """The measured frontier and its knee."""
 
+    #: Leave-one-out cost per family: how much PR-AUC drops when ONLY that
+    #: family is removed. Cumulative ablation answers "what is the cheapest
+    #: viable representation"; leave-one-out answers "what does this family
+    #: uniquely contribute". They disagree whenever two families are redundant,
+    #: and a freeze decision needs both: a family that looks free cumulatively
+    #: may be the sole carrier once its partner is gone.
+    leave_one_out: dict[str, float]
     points: tuple[AblationResult, ...]
     knee: AblationResult | None
     baseline: AblationResult
+    #: True when the probe was fitted on a separate training split. A frontier
+    #: fitted and scored on the same data is optimistic and must not drive a
+    #: freeze decision (Stage 0 fair-comparison rule 6).
+    held_out: bool = False
 
     @property
     def is_measured_frontier(self) -> bool:
@@ -173,7 +189,34 @@ class ParetoReport:
         return self.informative_cuts <= 1
 
     @property
+    def redundant_families(self) -> frozenset[str]:
+        """Families that cost nothing alone AND nothing in sequence.
+
+        These are the only honest removal candidates. A family that is free
+        cumulatively but costly leave-one-out is being masked by a partner and
+        must not be dropped.
+        """
+        cumulative_free: set[str] = set()
+        previous = self.baseline.pr_auc
+        for point in self.points[1:]:
+            family = point.removed[-1]
+            if (
+                previous is not None
+                and point.pr_auc is not None
+                and point.pr_auc >= previous - 1e-9
+            ):
+                cumulative_free.add(family)
+            previous = point.pr_auc
+        loo_free = {name for name, cost in self.leave_one_out.items() if cost <= 1e-9}
+        return frozenset(cumulative_free & loo_free)
+
+    @property
     def caveat(self) -> str:
+        if not self.held_out:
+            return (
+                "OPTIMISTIC: the probe was fitted and scored on the same split. "
+                "Fair-comparison rule 6 forbids using this to justify a freeze."
+            )
         if self.degenerate:
             return (
                 "DEGENERATE: only "
@@ -189,67 +232,53 @@ class ParetoReport:
             "baseline": self.baseline.to_dict(),
             "knee": self.knee.to_dict() if self.knee else None,
             "points": [p.to_dict() for p in self.points],
+            "leave_one_out": {k: round(v, 4) for k, v in self.leave_one_out.items()},
+            "redundant_families": sorted(self.redundant_families),
             "is_measured_frontier": self.is_measured_frontier,
+            "held_out": self.held_out,
             "informative_cuts": self.informative_cuts,
             "degenerate": self.degenerate,
             "caveat": self.caveat,
         }
 
 
-def _score(result: ScenarioResult, retained: frozenset[str]) -> float:
-    """Deterministic detection score from the retained fields only.
+def _fit_and_score(
+    retained: frozenset[str],
+    train: list[ScenarioResult],
+    evaluation: list[ScenarioResult],
+) -> list[float]:
+    """Fit the probe on ``train`` with the surviving fields, score ``evaluation``.
 
-    Each term is gated on the field family that carries it, so removing a
-    family genuinely removes the evidence it provided rather than merely
-    relabelling it.
+    Refitting per ablation is the point: each frontier point answers "how much
+    separation is still achievable without this information", rather than "how
+    much did my fixed weights happen to depend on it".
     """
-    score = 0.0
-    for transition in result.transitions:
-        if "state_delta" in retained and transition.state_delta:
-            score += transition.state_delta.magnitude * 1.0
-        if "invariant_delta" in retained:
-            score += max(0.0, transition.delta_phi) * 0.5
-        if "object_sem" in retained:
-            score += len(transition.object.semantics.asserted) * 0.25
-        if "actor_sem" in retained:
-            score += len(transition.actor.semantics.asserted) * 0.25
-        if "novelty_host" in retained:
-            score += transition.novelty.peak * 0.3
-        if "uncertainty" in retained:
-            score += transition.uncertainty * 0.1
-        if "time_bucket" in retained:
-            score += min(1.0, transition.temporal.since_actor_bucket / 15.0) * 0.05
-        if "causal_sig" in retained:
-            score += transition.responsibility * 0.2
-    return score
-
-
-def _normalise(scores: list[float]) -> list[float]:
-    """Min-max to [0, 1] so scores are comparable across ablations."""
-    if not scores:
-        return []
-    low, high = min(scores), max(scores)
-    if high <= low:
-        return [0.0] * len(scores)
-    return [(value - low) / (high - low) for value in scores]
+    names = feature_names(retained)
+    if not names:
+        return [0.0] * len(evaluation)
+    probe = LogisticProbe().fit(
+        [extract_features(r, names) for r in train],
+        [r.scenario.label for r in train],
+    )
+    return probe.predict([extract_features(r, names) for r in evaluation])
 
 
 def _evaluate(
     label: str,
     removed: tuple[str, ...],
     retained: frozenset[str],
-    results: list[ScenarioResult],
+    train: list[ScenarioResult],
+    evaluation: list[ScenarioResult],
     *,
     fpr_budget: float,
     threshold: float,
 ) -> AblationResult:
-    labels = [result.scenario.label for result in results]
-    raw = [_score(result, retained) for result in results]
-    scores = _normalise(raw)
+    labels = [result.scenario.label for result in evaluation]
+    scores = _fit_and_score(retained, train, evaluation)
 
     codec = SSIRCodec(retained=retained)
     per_record = codec.record_bytes(RepresentationLevel.L2)
-    transitions = sum(len(result.transitions) for result in results)
+    transitions = sum(len(result.transitions) for result in evaluation)
 
     matrix = confusion_at_threshold(labels, scores, threshold)
     recall_budget, _ = recall_at_max_fpr(labels, scores, fpr_budget)
@@ -270,19 +299,32 @@ def _evaluate(
 def run_guillotine(
     results: list[ScenarioResult],
     *,
+    train: list[ScenarioResult] | None = None,
     fpr_budget: float = 0.05,
     threshold: float = 0.5,
     knee_tolerance: float = 0.02,
 ) -> ParetoReport:
     """Ablate cumulatively and return the measured frontier.
 
+    ``train`` is the split the probe is fitted on. When omitted, ``results`` is
+    used for both, and the frontier is optimistic — reported honestly by
+    ``ParetoReport.held_out``. Stage 0 fair-comparison rule 6 forbids tuning
+    against the final test set, so a real freeze decision needs a held-out fit.
+
     The knee is the cheapest point whose PR-AUC is within ``knee_tolerance`` of
-    the full representation. Selecting it by measurement is the whole point:
-    an arbitrary field list would not survive acceptance criterion 9.
+    the full representation. Selecting it by measurement is the whole point: an
+    arbitrary field list would not survive acceptance criterion 9.
     """
     all_fields = frozenset(LAYOUTS)
+    fit_split = train if train is not None else results
     baseline = _evaluate(
-        "full", (), all_fields, results, fpr_budget=fpr_budget, threshold=threshold
+        "full",
+        (),
+        all_fields,
+        fit_split,
+        results,
+        fpr_budget=fpr_budget,
+        threshold=threshold,
     )
 
     points = [baseline]
@@ -296,14 +338,35 @@ def run_guillotine(
                 f"-{family.name}",
                 tuple(removed_names),
                 all_fields - removed_so_far,
+                fit_split,
                 results,
                 fpr_budget=fpr_budget,
                 threshold=threshold,
             )
         )
 
+    leave_one_out: dict[str, float] = {}
+    baseline_auc = baseline.pr_auc or 0.0
+    for family in ABLATIONS:
+        point = _evaluate(
+            f"only -{family.name}",
+            (family.name,),
+            all_fields - family.fields,
+            fit_split,
+            results,
+            fpr_budget=fpr_budget,
+            threshold=threshold,
+        )
+        leave_one_out[family.name] = max(0.0, baseline_auc - (point.pr_auc or 0.0))
+
     knee = _find_knee(points, baseline, knee_tolerance)
-    return ParetoReport(points=tuple(points), knee=knee, baseline=baseline)
+    return ParetoReport(
+        leave_one_out=leave_one_out,
+        points=tuple(points),
+        knee=knee,
+        baseline=baseline,
+        held_out=train is not None,
+    )
 
 
 def _find_knee(

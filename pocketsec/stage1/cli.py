@@ -32,6 +32,7 @@ def _build_parser() -> argparse.ArgumentParser:
         ("guillotine", "print the representation Pareto frontier"),
         ("calibrate", "print the Φ calibration report"),
         ("replay", "replay the corpus and print pipeline statistics"),
+        ("stability", "multi-draw freeze-stability of the representation frontier"),
     ):
         sub.add_parser(name, help=help_text)
     return parser
@@ -45,6 +46,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "guillotine": _guillotine,
         "calibrate": _calibrate,
         "replay": _replay,
+        "stability": _stability,
     }
     return handlers[args.command](as_json=args.json)
 
@@ -79,7 +81,8 @@ def _adversarial(*, as_json: bool) -> int:
 
 
 def _guillotine(*, as_json: bool) -> int:
-    report = run_guillotine(Stage1GateContext.build().results)
+    ctx = Stage1GateContext.build()
+    report = run_guillotine(ctx.guillotine_score, train=ctx.guillotine_fit)
     if as_json:
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True))
         return 0
@@ -136,6 +139,32 @@ def _replay(*, as_json: bool) -> int:
     print(f"novelty memory     {report['novelty_memory_bytes']} B")
     print(f"aggregation        {report['aggregation']}")
     print(f"observation        {report['observation']}")
+    return 0
+
+
+def _stability(*, as_json: bool) -> int:
+    from pocketsec.stage1.guillotine.stability import measure_stability
+
+    report = measure_stability(draws=5, corpus_size=200)
+    if as_json:
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True))
+        return 0
+    print("Representation freeze stability (synthetic hard corpus)\n")
+    print(
+        f"  {report.draws} draws of {report.corpus_size} scenarios; baseline PR-AUC "
+        f"{report.baseline_pr_auc[1]:.4f} "
+        f"[{report.baseline_pr_auc[0]:.4f}-{report.baseline_pr_auc[2]:.4f}]\n"
+    )
+    print(f"  {'family':<20}{'redundant':>11}{'LOO min':>9}{'LOO mean':>10}{'LOO max':>9}")
+    for name, rate in report.redundancy_rate.items():
+        low, mean, high = report.loo_spread[name]
+        print(f"  {name:<20}{rate * 100:>10.0f}%{low:>9.4f}{mean:>10.4f}{high:>9.4f}")
+    print(f"\n  freeze candidates: {sorted(report.freeze_candidates)}")
+    if report.unstable:
+        print(
+            f"  UNSTABLE (a single-draw frontier would have recommended dropping "
+            f"these): {sorted(report.unstable)}"
+        )
     return 0
 
 

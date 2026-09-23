@@ -149,14 +149,21 @@ def emit(
     host_id: str,
     boot_id: str = "boot-0001",
     pid: str = "1000",
+    elapsed_ns: int | None = None,
 ) -> list[RawEventV1]:
     """Emit one behaviour as raw records for a given sensor path.
 
     The two paths differ in *shape*, not content: auditd splits an operation
     across records sharing an assembly key, eBPF emits one. Both must compile to
     the same SSIR semantics.
+
+    ``elapsed_ns`` places the event on the host timeline. Without it every event
+    sits one millisecond after the last, which pins ``time_bucket`` to a single
+    value corpus-wide and makes the temporal field carry no information at all —
+    a measurement artefact that looks like "timing is useless".
     """
-    now = _BASE_NS + index * 1_000_000
+    monotonic = elapsed_ns if elapsed_ns is not None else index * 1_000_000
+    now = _BASE_NS + monotonic
     common = {"pid": pid, "start_time": "7", "uid": "1000", **behaviour.fields}
 
     if sensor is SensorPath.EBPF:
@@ -167,7 +174,7 @@ def emit(
                 boot_id=boot_id,
                 sensor=SensorPath.EBPF,
                 observed_at_ns=now,
-                monotonic_ns=index * 1_000_000,
+                monotonic_ns=monotonic,
                 record_type=behaviour.operation,
                 assembly_key=None,
                 fields={"operation": f"sys_{behaviour.operation}", **common},
@@ -185,7 +192,7 @@ def emit(
             boot_id=boot_id,
             sensor=SensorPath.AUDITD,
             observed_at_ns=now,
-            monotonic_ns=index * 1_000_000,
+            monotonic_ns=monotonic,
             record_type="SYSCALL",
             assembly_key=key,
             fields={
@@ -202,7 +209,7 @@ def emit(
             boot_id=boot_id,
             sensor=SensorPath.AUDITD,
             observed_at_ns=now + 1000,
-            monotonic_ns=index * 1_000_000 + 1000,
+            monotonic_ns=monotonic + 1000,
             record_type=detail_type,
             assembly_key=key,
             fields={"_expected_records": "2", **behaviour.fields},

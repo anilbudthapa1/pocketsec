@@ -43,12 +43,22 @@ Stage 2 **may not**, without an ADR and a new schema `$id`:
 - remove the bounds on any hot-path structure;
 - open a behaviour epoch from behavioural novelty alone.
 
-## Blocking prerequisite carried forward
+## Freeze status
 
-**The Information Guillotine frontier is degenerate on the current synthetic
-corpus** (1 of 9 cuts informative). The D1.13 field freeze is therefore *not*
-complete: no SSIR field may be dropped on the strength of the current knee.
+The D1.13 freeze is **resolved narrowly** (ADR-0007). The frontier is now
+measured on a hard corpus with a held-out fitted probe and is no longer
+degenerate; `exact_identity` is frozen out of the model-facing encoding at
+L0–L2 and retained at L3.
 
-Stage 2 may proceed — it does not depend on the freeze — but a harder corpus is
-required before any field is removed, and `ParetoReport.degenerate` must read
-false before the freeze is claimed.
+Stage 2 must not treat the remaining fields as provisional: seven of nine
+families are justified by measurement across draws, and `actor_semantics`
+specifically was shown to be load-bearing on 40% of draws despite looking
+redundant on one. Removing a field needs a fresh stability run and an ADR.
+
+**Still open, carried into Stage 2:**
+
+- Field *widths* are untested. The spec asks for 64/48/40/32/24/16-byte packing
+  targets to be challenged; only presence/absence has been settled.
+- The frontier reflects one probe family (a linear model). A different model
+  class could extract information this one cannot, which is Stage 2's business.
+- All corpora remain synthetic.

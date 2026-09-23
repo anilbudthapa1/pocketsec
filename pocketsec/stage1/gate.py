@@ -27,6 +27,29 @@ __all__ = ["Stage1GateContext", "run_gate"]
 EVAL_COUNT = 60
 SEED = 20_260_924
 
+#: Guillotine splits. Two disjoint labelled draws from the hard corpus: a
+#: supervised probe needs both classes, and scoring must never touch the split
+#: the probe was fitted on (Stage 0 fair-comparison rule 6).
+GUILLOTINE_SIZE = 160
+GUILLOTINE_FIT_SEED = 3
+GUILLOTINE_SCORE_SEED = 11
+#: Draws for the freeze-stability measurement. Kept small so the gate stays
+#: fast; `pocketsec-stage1 stability` runs a fuller sweep.
+STABILITY_DRAWS = 3
+STABILITY_SIZE = 160
+
+
+def _compile_hard(count: int, seed: int) -> list[ScenarioResult]:
+    from pocketsec.stage1.labs.hard_corpus import build_hard_corpus
+
+    pipeline = Stage1Pipeline()
+    return [
+        pipeline.run_scenario(scenario, offset=index)
+        for index, scenario in enumerate(
+            build_hard_corpus(count=count, seed=seed, split="eval")
+        )
+    ]
+
 
 @dataclass
 class Stage1GateContext:
@@ -37,6 +60,10 @@ class Stage1GateContext:
     peak_rss_bytes: int | None
     cpu_seconds: float
     transitions: int
+    #: Two disjoint labelled splits from the HARD corpus, for the guillotine.
+    #: The easy corpus produced a degenerate frontier; see docs/stage-1-ssir-spec.md.
+    guillotine_fit: list[ScenarioResult]
+    guillotine_score: list[ScenarioResult]
 
     @classmethod
     def build(cls) -> Stage1GateContext:
@@ -54,6 +81,8 @@ class Stage1GateContext:
             peak_rss_bytes=metrics.peak_sampled_rss_bytes or metrics.peak_rss_bytes,
             cpu_seconds=metrics.cpu_seconds,
             transitions=transitions,
+            guillotine_fit=_compile_hard(GUILLOTINE_SIZE, GUILLOTINE_FIT_SEED),
+            guillotine_score=_compile_hard(GUILLOTINE_SIZE, GUILLOTINE_SCORE_SEED),
         )
 
 
@@ -348,9 +377,14 @@ def _aggregation_preserves_high_consequence(ctx: Stage1GateContext) -> GateCheck
 
 def _guillotine_pareto(ctx: Stage1GateContext) -> GateCheck:
     """9 — a measured Pareto frontier, not an arbitrary field list."""
-    report = run_guillotine(ctx.results)
+    report = run_guillotine(ctx.guillotine_score, train=ctx.guillotine_fit)
     knee = report.knee
-    passed = report.is_measured_frontier and knee is not None
+    passed = (
+        report.is_measured_frontier
+        and knee is not None
+        and report.held_out
+        and not report.degenerate
+    )
     detail = (
         f"{len(report.points)} measured points spanning "
         f"{min(p.bytes_per_transition for p in report.points):.0f}-"
@@ -379,35 +413,47 @@ def _renaming_generalisation() -> GateCheck:
 
 
 def _field_justification(ctx: Stage1GateContext) -> GateCheck:
-    """11 — every retained SSIR field has experimental justification."""
-    report = run_guillotine(ctx.results)
-    baseline = report.baseline.pr_auc or 0.0
-    # A family is justified when removing it measurably costs security retention
-    # OR it is retained for investigation rather than detection (evidence link).
-    justified: list[str] = []
-    unjustified: list[str] = []
-    previous = baseline
-    for point in report.points[1:]:
-        family = point.removed[-1]
-        current = point.pr_auc or 0.0
-        if current < previous - 1e-9 or family == "evidence_link":
-            justified.append(family)
-        else:
-            unjustified.append(family)
-        previous = current
+    """11 — every retained SSIR field has experimental justification.
 
+    Justification is measured two ways and must agree, because they answer
+    different questions. Cumulative ablation finds the cheapest viable
+    representation; leave-one-out finds what a family uniquely contributes. A
+    family that looks free cumulatively but costly alone is being masked by a
+    redundant partner and must be retained.
+
+    Stability across draws is then required on top: a single frontier claimed
+    four redundant families, of which measurement across draws showed one
+    (object_semantics) is never redundant and another (actor_semantics) is
+    redundant only some of the time.
+    """
+    from pocketsec.stage1.guillotine.stability import measure_stability
+
+    stability = measure_stability(draws=STABILITY_DRAWS, corpus_size=STABILITY_SIZE)
+    report = run_guillotine(ctx.guillotine_score, train=ctx.guillotine_fit)
+
+    justified = sorted(
+        name for name, rate in stability.redundancy_rate.items() if rate < 1.0
+    )
     calibration = calibrate(
         [(r.final_state, r.scenario.label) for r in ctx.results if r.transitions]
     )
-    passed = bool(justified)
+    # Every family must be either justified by measurement or an explicit,
+    # stable freeze candidate. Nothing may sit unexplained.
+    accounted = set(justified) | set(stability.freeze_candidates)
+    passed = accounted == set(stability.redundancy_rate) and bool(justified)
+
     return GateCheck(
         "G1.11",
         "Every retained SSIR field experimentally justified",
         passed,
-        f"families whose removal measurably costs security retention: {justified}; "
-        f"families with no measured cost (candidates for removal at freeze): "
-        f"{unjustified}; Φ composition gain over an additive control: "
-        f"{calibration.composition_gain:.3f}",
+        f"measured over {stability.draws} independent draws: {len(justified)} families "
+        f"justified (not redundant on every draw); freeze candidates "
+        f"{sorted(stability.freeze_candidates)}; UNSTABLE (single-draw would mislead) "
+        f"{sorted(stability.unstable)}; baseline PR-AUC "
+        f"{stability.baseline_pr_auc[1]:.4f} "
+        f"[{stability.baseline_pr_auc[0]:.4f}-{stability.baseline_pr_auc[2]:.4f}]; "
+        f"knee {report.knee.bytes_per_transition:.0f}/{report.baseline.bytes_per_transition:.0f} B; "
+        f"Φ composition gain over an additive control {calibration.composition_gain:.3f}",
     )
 
 

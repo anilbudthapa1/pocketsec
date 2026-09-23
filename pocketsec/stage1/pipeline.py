@@ -30,7 +30,17 @@ from pocketsec.stage1.state.security_state import SecurityStateV1
 from pocketsec.stage1.telemetry.assembler import EventAssembler
 from pocketsec.stage1.telemetry.raw_event_v1 import SensorPath
 
-__all__ = ["ScenarioResult", "Stage1Pipeline"]
+__all__ = [
+    "DEFAULT_SCENARIO_SPACING_NS",
+    "DEFAULT_STEP_GAP_NS",
+    "ScenarioResult",
+    "Stage1Pipeline",
+]
+
+#: Default gap between consecutive behaviours in a scenario (1 ms).
+DEFAULT_STEP_GAP_NS = 1_000_000
+#: Gap between scenarios, so separate actors are not adjacent on the timeline.
+DEFAULT_SCENARIO_SPACING_NS = 60_000_000_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,13 +112,19 @@ class Stage1Pipeline:
         pid = str(1000 + offset)
 
         events = []
+        elapsed = offset * DEFAULT_SCENARIO_SPACING_NS
         for index, behaviour in enumerate(scenario.behaviours):
+            # A behaviour may declare the gap since the previous one. Defaulting
+            # to a fixed 1 ms would pin every time_bucket to one value and make
+            # the temporal field measurably useless for reasons of our own making.
+            elapsed += int(behaviour.fields.get("_gap_ns", DEFAULT_STEP_GAP_NS))
             for record in emit(
                 behaviour,
                 sensor=sensor,
                 index=offset * 100 + index,
                 host_id=self.host_id,
                 pid=pid,
+                elapsed_ns=elapsed,
             ):
                 events.extend(assembler.feed(record))
         events.extend(assembler.flush())

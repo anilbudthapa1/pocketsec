@@ -2,8 +2,8 @@
 
 **Specification version:** 1.0
 **Source of truth:** `PocketSec_Stage_1_SSIR_Security_State_Final.docx`
-**Status:** implemented; acceptance gate passing. **Not frozen** — D1.13 freeze
-is still open, see "What is not settled" below.
+**Status:** implemented; acceptance gate passing. D1.13 freeze **resolved
+narrowly** — see ADR-0007; field widths remain provisional.
 
 > **Thesis.** Observe only what uncertainty justifies. Represent only what
 > changes security decisions. Maintain what is now true, not merely what
@@ -124,22 +124,86 @@ still emitted.
 | Flood | bounds held, 99% aggregated |
 | Sensor disagreement | uncertainty rose (0.55 vs 0.30) |
 
-## What is not settled
+## The Information Guillotine (D1.11) and the D1.13 freeze
 
-Honest limitations, recorded rather than smoothed over:
+The first frontier was **degenerate** — 8 of 9 cuts cost nothing, because the
+original corpus's benign and malicious scenarios shared almost no operations.
+That measured the corpus, not the representation. Fixing it exposed three
+methodology defects and one corpus bug, each now pinned by a test:
 
-1. **The Information Guillotine frontier is degenerate on this corpus.** Only
-   1 of 9 cuts measurably costs security retention, because the synthetic
-   scenarios are separable by many redundant signals. The report says so itself
-   (`ParetoReport.degenerate`). **The knee must not be used to justify dropping
-   fields at the D1.13 freeze.** A harder corpus is the blocking prerequisite.
-2. **All data is synthetic.** Every number here demonstrates the mechanism, not
+1. **Hand-picked probe weights.** Removing novelty and timing *raised* PR-AUC,
+   which says the weights were wrong. The probe is now a plain L2 logistic
+   regression **refitted per ablation** on a split disjoint from the one it
+   scores, so each point answers "how much separation is still achievable
+   without this information".
+2. **A benign-only fit split.** A supervised probe with no positives produced an
+   inverted ranking and a baseline PR-AUC of 0.23 against a 0.355 base rate —
+   worse than random. `LogisticProbe.fit` now refuses a single-class split.
+3. **`time_bucket` constant corpus-wide.** `emit` hard-coded a 1 ms gap, so
+   timing measured as useless for reasons of our own making.
+4. **Corpus bug:** the timing discriminator pair returned the *same* behaviours
+   for both labels — pure label noise, capping achievable PR-AUC.
+
+### The measured frontier (held out, hard corpus)
+
+| cut | bytes | PR-AUC |
+|---|---|---|
+| full | 37 | 0.996 |
+| −exact_identity | 29 | 0.996 |
+| −evidence_link | 25 | 0.996 |
+| −object_semantics | 23 | 0.992 |
+| −actor_semantics | 21 | 0.992 |
+| −capability_delta | 17 | 0.875 |
+| −uncertainty | 16 | 0.867 |
+| −novelty | 12 | 0.830 |
+| −timing | 11 | 0.822 |
+| −causal_memory | 2 | 0.398 |
+
+### Why the knee is not the freeze
+
+Cumulative ablation finds the cheapest viable path; **leave-one-out** finds what
+a family uniquely contributes. They disagree under redundancy, and a freeze
+needs both. Measured over 5 draws:
+
+| Family | Redundant on | LOO cost (min/mean/max) |
+|---|---|---|
+| `exact_identity` | **100%** | 0.0000 / 0.0000 / 0.0000 |
+| `evidence_link` | **100%** | 0.0000 / 0.0000 / 0.0000 |
+| `actor_semantics` | 60% — **unstable** | 0.0000 / 0.0019 / 0.0094 |
+| `object_semantics` | **0%** | 0.0024 / 0.0053 / 0.0115 |
+| `capability_delta` | 0% | 0.0084 / 0.0260 / 0.0494 |
+| `uncertainty` | 0% | 0.0265 / 0.0296 / 0.0377 |
+| `novelty` | 0% | 0.0216 / 0.0469 / 0.0677 |
+| `timing` | 0% | 0.0067 / 0.0127 / 0.0253 |
+| `causal_memory` | 0% | 0.0000 / 0.0000 / 0.0000 |
+
+**`actor_semantics` is the finding.** A single draw called it redundant and the
+knee recommended dropping it; across draws it is redundant only 60% of the time.
+A single-frontier freeze would have removed a load-bearing field.
+
+`causal_memory` has zero unique contribution but a cumulative cost of 0.513: it
+is the last carrier standing, not a redundant one.
+
+### Freeze decision (ADR-0007)
+
+Only **`exact_identity`** is frozen out of the model-facing encoding, at L0–L2.
+It remains at L3 for hub correlation and investigation. `evidence_link` is free
+for detection and **retained anyway** — the investigator's path back to raw
+evidence is a Stage 0 invariant, and measurement does not get to overrule it.
+
+Saving: 8 bytes of 37. A larger cut was available on paper and is not supported
+by measurement.
+
+## What is still not settled
+
+1. **All data is synthetic.** Every number here demonstrates the mechanism, not
    detection quality. Stage 0 fair-comparison rule 7 applies.
-3. **Confidence is uncalibrated.** Both Stage 1 slots report
+2. **Confidence is uncalibrated.** Both Stage 1 slots report
    `calibration_id=None` rather than inventing one.
-4. **SSIR field widths are provisional.** The spec asks for 64/48/40/32/24/16
-   byte targets to be challenged; the codec supports arbitrary retained-field
-   sets, but the freeze decision awaits (1).
+3. **Field widths remain provisional.** Only the presence/absence decision in
+   ADR-0007 is settled; 64/48/40/32/24/16-byte packing targets are untested.
+4. **One probe family.** The frontier reflects what a linear probe can extract.
+   A different model class could find information this one cannot.
 
 ## Extension points for Stage 2
 
