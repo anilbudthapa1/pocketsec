@@ -89,6 +89,7 @@ class _TorchLikeModule:
     hidden: int = 32
     epochs: int = DEFAULT_EPOCHS
     learning_rate: float = DEFAULT_LR
+    batch_size: int = 16
     seed: int = 7
     params: list[Tensor] = field(default_factory=list)
     _velocity: list[np.ndarray] = field(default_factory=list)
@@ -115,18 +116,38 @@ class _TorchLikeModule:
         raise NotImplementedError
 
     def fit(self, dataset: Stage2Dataset) -> _TorchLikeModule:
+        """Mini-batch SGD.
+
+        Full-batch training gives one gradient step per epoch, so 30 epochs is
+        30 updates — enough for a shallow pooled model and nowhere near enough
+        for a deep recurrent one. Comparing them under that budget measures
+        depth-of-optimisation, not architecture, and produced baselines scoring
+        *below* the base rate.
+        """
         batch, mask, labels = _pad(dataset.samples)
         self._build(batch.shape[-1])
         self._velocity = [np.zeros_like(p.data) for p in self.params]
 
+        rows = len(batch)
+        size = max(1, min(self.batch_size, rows))
+        rng = np.random.default_rng(self.seed)
+
         for _ in range(self.epochs):
-            for parameter in self.params:
-                parameter.zero_grad()
-            logits = self.forward(batch, mask)
-            loss = binary_cross_entropy(logits, labels)
-            loss.backward()
-            self._step()
-            self._losses.append(float(loss.data))
+            order = rng.permutation(rows)
+            epoch_loss = 0.0
+            batches = 0
+            for start in range(0, rows, size):
+                index = order[start : start + size]
+                for parameter in self.params:
+                    parameter.zero_grad()
+                loss = binary_cross_entropy(
+                    self.forward(batch[index], mask[index]), labels[index]
+                )
+                loss.backward()
+                self._step()
+                epoch_loss += float(loss.data)
+                batches += 1
+            self._losses.append(epoch_loss / max(batches, 1))
         return self
 
     def _step(self) -> None:

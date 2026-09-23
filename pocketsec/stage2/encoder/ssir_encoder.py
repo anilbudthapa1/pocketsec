@@ -33,6 +33,8 @@ from pocketsec.stage1.state.security_state import DIMENSIONS
 
 __all__ = [
     "ENCODER_VERSION",
+    "GROUP_OFFSETS",
+    "NEED_SIGNAL_INDICES",
     "FEATURE_LAYOUT",
     "FEATURE_WIDTH",
     "EncodedTransition",
@@ -91,6 +93,30 @@ def _feature_layout() -> tuple[tuple[str, int], ...]:
 
 FEATURE_LAYOUT: tuple[tuple[str, int], ...] = _feature_layout()
 FEATURE_WIDTH: int = sum(width for _, width in FEATURE_LAYOUT)
+
+
+def _group_offsets() -> dict[str, int]:
+    """Start index of each feature group, derived from the layout."""
+    offsets: dict[str, int] = {}
+    cursor = 0
+    for group, width in FEATURE_LAYOUT:
+        offsets[group] = cursor
+        cursor += width
+    return offsets
+
+
+GROUP_OFFSETS: dict[str, int] = _group_offsets()
+
+#: Named indices for the five Need-to-Compute signals (DTL-F02). Derived from
+#: the layout, never hardcoded: a magic index into a frozen layout silently
+#: points at the wrong feature the moment the layout grows.
+NEED_SIGNAL_INDICES: dict[str, int] = {
+    "novelty_peak": GROUP_OFFSETS["novelty_scalars"],
+    "delta_phi": GROUP_OFFSETS["delta_phi"],
+    "uncertainty": GROUP_OFFSETS["uncertainty"],
+    "responsibility": GROUP_OFFSETS["causal"],
+    "state_delta_magnitude": GROUP_OFFSETS["state_delta_scalars"],
+}
 
 
 def feature_names() -> tuple[str, ...]:

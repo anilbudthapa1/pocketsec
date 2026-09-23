@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from pocketsec.stage1.labs.hard_corpus import build_hard_corpus
+from pocketsec.stage1.labs.longhorizon_corpus import build_long_horizon_corpus
 from pocketsec.stage1.pipeline import ScenarioResult, Stage1Pipeline
 from pocketsec.stage2.encoder.ssir_encoder import (
     ENCODER_VERSION,
@@ -72,6 +73,7 @@ class Stage2Dataset:
 
     name: str
     seed: int
+    corpus: str
     encoder_version: str
     feature_width: int
     samples: tuple[Stage2Sample, ...]
@@ -102,6 +104,10 @@ class Stage2Dataset:
         return {
             "name": self.name,
             "seed": self.seed,
+            "corpus": self.corpus,
+            "mean_length": round(
+                self.transition_count / max(len(self.samples), 1), 2
+            ),
             "encoder_version": self.encoder_version,
             "feature_width": self.feature_width,
             "samples": len(self.samples),
@@ -128,7 +134,9 @@ def _encode(result: ScenarioResult, index: int) -> Stage2Sample | None:
     )
 
 
-def build_dataset(*, name: str, count: int, seed: int) -> Stage2Dataset:
+def build_dataset(
+    *, name: str, count: int, seed: int, corpus: str = "hard"
+) -> Stage2Dataset:
     """Compile a hard-corpus split through Stage 1 and encode it.
 
     Each split gets a fresh :class:`Stage1Pipeline`, so novelty and lattice state
@@ -136,10 +144,13 @@ def build_dataset(*, name: str, count: int, seed: int) -> Stage2Dataset:
     on. Sharing a pipeline would let the fit split warm the novelty engine that
     scores the eval split — a subtle and total leak.
     """
+    builder = (
+        build_long_horizon_corpus if corpus == "long" else build_hard_corpus
+    )
     pipeline = Stage1Pipeline()
     samples: list[Stage2Sample] = []
     for index, scenario in enumerate(
-        build_hard_corpus(count=count, seed=seed, split="eval")
+        builder(count=count, seed=seed, split="eval")
     ):
         encoded = _encode(pipeline.run_scenario(scenario, offset=index), index)
         if encoded is not None:
@@ -147,6 +158,7 @@ def build_dataset(*, name: str, count: int, seed: int) -> Stage2Dataset:
 
     return Stage2Dataset(
         name=name,
+        corpus=corpus,
         seed=seed,
         encoder_version=ENCODER_VERSION,
         feature_width=FEATURE_WIDTH,

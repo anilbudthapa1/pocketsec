@@ -82,18 +82,24 @@ class Tensor:
         if self.data.size != 1:
             raise ValueError("backward() requires a scalar output")
 
+        # Iterative, not recursive: a 90-step recurrent graph is thousands of
+        # nodes deep and a recursive walk blows the interpreter stack. Long
+        # sequences are the normal case for this model, not an edge case.
         ordered: list[Tensor] = []
         seen: set[int] = set()
-
-        def visit(node: Tensor) -> None:
+        stack: list[tuple[Tensor, bool]] = [(self, False)]
+        while stack:
+            node, expanded = stack.pop()
+            if expanded:
+                ordered.append(node)
+                continue
             if id(node) in seen:
-                return
+                continue
             seen.add(id(node))
+            stack.append((node, True))
             for parent in node._parents:
-                visit(parent)
-            ordered.append(node)
-
-        visit(self)
+                if id(parent) not in seen:
+                    stack.append((parent, False))
         self.grad = np.ones_like(self.data)
         for node in reversed(ordered):
             node._backward()
@@ -248,6 +254,19 @@ class Tensor:
         out._backward = _backward
         return out
 
+
+    def slice_cols(self, start: int, stop: int) -> Tensor:
+        out = self._child(self.data[:, start:stop], (self,), "slice_cols")
+
+        def _backward() -> None:
+            if out.grad is None:
+                return
+            gradient = np.zeros_like(self.data)
+            gradient[:, start:stop] = out.grad
+            self._accumulate(gradient)
+
+        out._backward = _backward
+        return out
 
     def reshape(self, *shape: int) -> Tensor:
         original = self.data.shape
