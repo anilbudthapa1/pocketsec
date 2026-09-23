@@ -69,8 +69,53 @@ def test_no_importable_module_lives_outside_the_package() -> None:
     assert not stray, f"Python modules outside the package: {stray}"
 
 
+#: Offline research code, exempt from the stdlib-only rule (ADR-0008).
+RESEARCH_PREFIX = "pocketsec/stage2/research/"
+
+
 def _runtime_modules() -> list[Path]:
-    return sorted((REPO_ROOT / "pocketsec").rglob("*.py"))
+    """Every module that could run on an endpoint (i.e. not offline research)."""
+    return sorted(
+        path
+        for path in (REPO_ROOT / "pocketsec").rglob("*.py")
+        if not str(path.relative_to(REPO_ROOT)).startswith(RESEARCH_PREFIX)
+    )
+
+
+def _research_modules() -> list[Path]:
+    return sorted((REPO_ROOT / "pocketsec" / "stage2" / "research").rglob("*.py"))
+
+
+def test_runtime_never_imports_research_code() -> None:
+    """ADR-0008: the boundary is one-directional.
+
+    Research may depend on the runtime. The runtime must never depend on
+    research, or numpy would reach the endpoint through the back door.
+    """
+    offenders: list[str] = []
+    for path in _runtime_modules():
+        # AST, not text search: a docstring that *names* the boundary is not a
+        # violation of it.
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            modules: list[str] = []
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                modules = [node.module]
+            if any(m.startswith("pocketsec.stage2.research") for m in modules):
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+    assert not offenders, f"runtime modules importing research code: {offenders}"
+
+
+def test_research_package_is_the_only_numpy_user() -> None:
+    """The exemption must stay narrow and be visible."""
+    using_numpy = [
+        str(path.relative_to(REPO_ROOT))
+        for path in _research_modules()
+        if "import numpy" in path.read_text(encoding="utf-8")
+    ]
+    assert using_numpy, "the research exemption exists to be used; nothing uses it"
 
 
 def test_runtime_has_no_third_party_imports() -> None:
