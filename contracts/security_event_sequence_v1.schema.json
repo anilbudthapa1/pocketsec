@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pocketsec.security_event_sequence.v1",
+  "version": "1.0.0",
+  "title": "SecurityEventSequenceV1",
+  "description": "Hub -> model-slot input. Stage 0 freezes the envelope only; the security ontology lives in the opaque 'attributes' map and is Stage 1's subject. Breaking changes take a new $id (…v2), never a version bump.",
+  "type": "object",
+  "required": ["schema", "schema_version", "sequence_id", "host_id", "events"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "pocketsec.security_event_sequence.v1" },
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "sequence_id": { "$ref": "#/$defs/identifier" },
+    "host_id": { "$ref": "#/$defs/identifier" },
+    "window_capacity": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4096,
+      "default": 4096,
+      "description": "Hard bound on the window. Endpoint state, queues and caches must be bounded; an unbounded sequence is an unbounded allocation on a 2 GB host."
+    },
+    "truncated": {
+      "type": "boolean",
+      "default": false,
+      "description": "True when the bounded window dropped earlier events. Lets a slot distinguish 'nothing happened before' from 'we stopped looking', so a bounded buffer cannot silently become a false negative."
+    },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4096,
+      "items": { "$ref": "#/$defs/event" }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$"
+    },
+    "evidence_ref": {
+      "type": "object",
+      "description": "A pointer to raw evidence held outside the model. Evidence is referenced, never inlined, and the digest binds the reference to exact bytes so lineage survives compression.",
+      "required": ["store", "locator", "digest"],
+      "additionalProperties": false,
+      "properties": {
+        "store": { "$ref": "#/$defs/identifier" },
+        "locator": { "type": "string", "minLength": 1 },
+        "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    },
+    "event": {
+      "type": "object",
+      "required": [
+        "event_id",
+        "host_id",
+        "boot_id",
+        "observed_at_ns",
+        "monotonic_ns",
+        "source",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "event_id": { "$ref": "#/$defs/identifier" },
+        "host_id": { "$ref": "#/$defs/identifier" },
+        "boot_id": {
+          "$ref": "#/$defs/identifier",
+          "description": "Monotonic timestamps are only comparable within one boot."
+        },
+        "observed_at_ns": { "type": "integer", "minimum": 0 },
+        "monotonic_ns": { "type": "integer", "minimum": 0 },
+        "source": { "$ref": "#/$defs/identifier" },
+        "kind": {
+          "$ref": "#/$defs/identifier",
+          "description": "Coarse source-level label such as 'process.exec'. NOT a threat class: nothing in the input contract may encode a verdict."
+        },
+        "attributes": {
+          "type": "object",
+          "description": "Deliberately opaque string map. Stage 0 non-goal: do not hard-code a final threat taxonomy. Stage 1 formalises these keys without renegotiating Stage 0 measurement rules.",
+          "additionalProperties": { "type": "string" }
+        },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidence_ref" }
+        }
+      }
+    }
+  }
+}

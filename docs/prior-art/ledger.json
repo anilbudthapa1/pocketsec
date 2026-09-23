@@ -1,0 +1,79 @@
+{
+  "ledger_version": "1.0.0",
+  "policy": "No novelty claim without literature review, and before publication or patenting, a patent/prior-art review. An entry may only be marked REVIEWED when it actually cites related work. Every hypothesis in pocketsec.stage0.hypotheses must appear here.",
+  "status_values": ["NOT_REVIEWED", "IN_PROGRESS", "REVIEWED"],
+  "entries": [
+    {
+      "hypothesis_id": "H0",
+      "claim": "A conventional compact classifier / GRU is an adequate hard baseline for Linux security-event sequences.",
+      "literature_status": "NOT_REVIEWED",
+      "patent_status": "NOT_REVIEWED",
+      "related_work": [],
+      "notes": "No novelty claimed: H0 is deliberately prior art. Review needed only to pick a defensible representative, not to establish originality."
+    },
+    {
+      "hypothesis_id": "H1",
+      "claim": "A state-space / recurrent baseline captures temporal structure at fixed state cost.",
+      "literature_status": "NOT_REVIEWED",
+      "patent_status": "NOT_REVIEWED",
+      "related_work": [],
+      "notes": "No novelty claimed. Survey S4/Mamba-family and classical HMM literature before selecting a representative."
+    },
+    {
+      "hypothesis_id": "H2",
+      "claim": "Security behaviour can be compiled into a minimal learned automaton over states and transitions.",
+      "literature_status": "NOT_REVIEWED",
+      "patent_status": "NOT_REVIEWED",
+      "related_work": [],
+      "notes": "Overlaps heavily with automata learning, grammatical inference and state minimisation. Must be reviewed before any novelty language is used anywhere in the project."
+    },
+    {
+      "hypothesis_id": "H3",
+      "claim": "Computation can be budgeted by informational surprise so cost scales with novelty rather than event volume.",
+      "literature_status": "NOT_REVIEWED",
+      "patent_status": "NOT_REVIEWED",
+      "related_work": [],
+      "notes": "Adjacent to conditional computation, early-exit networks and adaptive computation time. Instrumented in ThreatPredictionV1.compute_path, but the mechanism is unmeasured at Stage 0."
+    },
+    {
+      "hypothesis_id": "H4",
+      "claim": "Stable learned behaviour can be JIT-compiled into cheap executable detectors, and demoted back when it degrades.",
+      "literature_status": "NOT_REVIEWED",
+      "patent_status": "NOT_REVIEWED",
+      "related_work": [],
+      "notes": "Adjacent to neural-to-symbolic rule extraction, knowledge distillation and model compilation. The reversible demotion path is the part most worth checking for prior art."
+    },
+    {
+      "hypothesis_id": "H5",
+      "claim": "Model complexity can follow host behavioural complexity via adaptive state growth and merging.",
+      "literature_status": "NOT_REVIEWED",
+      "patent_status": "NOT_REVIEWED",
+      "related_work": [],
+      "notes": "Adjacent to non-parametric Bayesian methods, dynamic architectures and state-merging automata induction."
+    },
+    {
+      "hypothesis_id": "H6",
+      "claim": "A HOT/WARM/COLD/FORGOTTEN hierarchy bounds memory while retaining recognisable behaviour.",
+      "literature_status": "NOT_REVIEWED",
+      "patent_status": "NOT_REVIEWED",
+      "related_work": [],
+      "notes": "Adjacent to cache hierarchies, sketching/sublinear summaries and continual-learning replay buffers."
+    },
+    {
+      "hypothesis_id": "H7",
+      "claim": "A relational latent state over process/user/file/network entities beats raw event-sequence representation.",
+      "literature_status": "NOT_REVIEWED",
+      "patent_status": "NOT_REVIEWED",
+      "related_work": [],
+      "notes": "Substantial existing work in provenance-graph intrusion detection. Review before any comparative claim."
+    },
+    {
+      "hypothesis_id": "H8",
+      "claim": "The combined NERA architecture outperforms its parts, with each component independently justified by ablation.",
+      "literature_status": "NOT_REVIEWED",
+      "patent_status": "NOT_REVIEWED",
+      "related_work": [],
+      "notes": "Stage 0 non-goal is explicit: do not claim NERA is novel or superior. This entry stays NOT_REVIEWED until the component hypotheses have measured ablations."
+    }
+  ]
+}

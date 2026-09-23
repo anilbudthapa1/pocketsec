@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Stage 0 D0.8. The gate job is authoritative: it runs the acceptance gate,
+# which itself runs the H0 baseline end to end through the benchmark harness.
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The reproducibility policy records the commit with every result;
+          # a shallow clone would leave git_commit unresolvable.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Dev extra only. The runtime itself has no dependencies (ADR-0001).
+      - name: Install dev tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check pocketsec tests
+
+      - name: Type check
+        run: mypy
+
+      - name: Tests
+        env:
+          # Fixed so hash-ordered iteration is reproducible across runs.
+          PYTHONHASHSEED: "0"
+        run: pytest -q
+
+  gate:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: python -m pip install -e .
+
+      - name: Stage 0 acceptance gate
+        env:
+          PYTHONHASHSEED: "0"
+        run: python -m pocketsec.stage0.cli gate
+
+      - name: Smoke benchmark (H0 baseline through the harness)
+        env:
+          PYTHONHASHSEED: "0"
+        run: python -m pocketsec.stage0.cli --json smoke > smoke-result.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stage0-smoke-result
+          path: smoke-result.json

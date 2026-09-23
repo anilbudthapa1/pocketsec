@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Artifact stores: directory structure and READMEs are tracked, contents are not.
+# Retention policy lives in docs/reproducibility-policy.md section 7.
+# experiments/registry.jsonl is the exception and IS tracked: it is the ledger.
+results/*
+!results/README.md
+datasets/*
+!datasets/README.md
+models/experimental/*
+!models/experimental/README.md
+models/compiled/*
+!models/compiled/README.md
+
+# Tooling runtime state, not project content
+.newcrm/

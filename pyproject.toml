@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pocketsec"
+version = "0.1.0"
+description = "PocketSec — ultra-lightweight Linux security-event intelligence hub (Stage 0 research foundation)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+
+# ADR-0002: the endpoint runtime has ZERO third-party runtime dependencies.
+# The 2 GB host target and the reproducibility policy both depend on this.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
+
+[project.scripts]
+pocketsec-stage0 = "pocketsec.stage0.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["pocketsec*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = ["slow: benchmark-style tests that sample real process resources"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["pocketsec", "tests"]

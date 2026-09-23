@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pocketsec.threat_prediction.v1",
+  "version": "1.0.0",
+  "title": "ThreatPredictionV1",
+  "description": "Model-slot -> hub output. Carries NO response authority: there is no action, remediation, command or privilege field, and additionalProperties is false so one cannot be smuggled in. Response authority is Stage 5's, gated by SENTINEL. Confidence never earns it.",
+  "type": "object",
+  "required": [
+    "schema",
+    "schema_version",
+    "prediction_id",
+    "sequence_id",
+    "verdict",
+    "confidence",
+    "novelty_score",
+    "uncertainty",
+    "abstained",
+    "compute_path",
+    "model_state_version"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "pocketsec.threat_prediction.v1" },
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "prediction_id": { "$ref": "#/$defs/identifier" },
+    "sequence_id": { "$ref": "#/$defs/identifier" },
+    "verdict": {
+      "enum": [
+        "BENIGN",
+        "SUSPICIOUS",
+        "MALICIOUS",
+        "UNKNOWN",
+        "UNIDENTIFIABLE",
+        "INSUFFICIENT_EVIDENCE"
+      ],
+      "description": "The last three are answers, not error states. Novelty is not maliciousness."
+    },
+    "state_identifier": {
+      "oneOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }],
+      "description": "Threat or behaviour-machine state id, when the slot has one."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Confidence in the STATED VERDICT, not a detection score. A confidently-BENIGN window is a weak detection, not a strong one; consumers must map verdict-aware."
+    },
+    "calibration_id": {
+      "oneOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }],
+      "description": "null means the confidence is UNCALIBRATED. Never invent a calibration id to satisfy this schema: an unmeasured calibration is a fabricated result."
+    },
+    "novelty_score": { "type": "number", "minimum": 0, "maximum": 1 },
+    "uncertainty": { "type": "number", "minimum": 0, "maximum": 1 },
+    "abstained": {
+      "type": "boolean",
+      "description": "When true, verdict must be UNKNOWN, UNIDENTIFIABLE or INSUFFICIENT_EVIDENCE."
+    },
+    "evidence_relevance": {
+      "type": "array",
+      "description": "Weighted pointers back to the raw evidence that drove the verdict, preserving lineage from compressed representation to source bytes.",
+      "items": {
+        "type": "object",
+        "required": ["ref", "weight"],
+        "additionalProperties": false,
+        "properties": {
+          "ref": { "$ref": "#/$defs/evidence_ref" },
+          "weight": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "next_event": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "surprise_bits": {
+              "oneOf": [{ "type": "number", "minimum": 0 }, { "type": "null" }],
+              "description": "I(e|s) = -log2 P(e|s), the novelty-budget input."
+            },
+            "distribution": {
+              "oneOf": [
+                { "type": "object", "additionalProperties": { "type": "number" } },
+                { "type": "null" }
+              ]
+            }
+          }
+        },
+        { "type": "null" }
+      ]
+    },
+    "compute_path": {
+      "enum": ["CHEAP_TRANSITION", "STATISTICAL", "LEARNED_SOLVER"],
+      "description": "Which tier of the novelty-energy ladder produced this. Recording it per prediction is what makes 'percentage of events resolved without neural inference' a measured number instead of a claim."
+    },
+    "compute_budget_units": { "type": "number", "minimum": 0 },
+    "model_state_version": {
+      "$ref": "#/$defs/identifier",
+      "description": "Version of the learned state, distinct from the code version."
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$"
+    },
+    "evidence_ref": {
+      "type": "object",
+      "required": ["store", "locator", "digest"],
+      "additionalProperties": false,
+      "properties": {
+        "store": { "$ref": "#/$defs/identifier" },
+        "locator": { "type": "string", "minLength": 1 },
+        "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    }
+  }
+}
