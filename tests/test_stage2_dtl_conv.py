@@ -164,3 +164,63 @@ def test_routing_reports_a_path_distribution(splits) -> None:  # type: ignore[no
     routing = model.route(test)
     assert abs(sum(routing["path_fractions"].values()) - 1.0) < 1e-6
     assert routing["compute_units_per_event"] > 0
+
+
+# --- the ambiguous corpus and what it enables --------------------------------
+
+
+@pytest.fixture(scope="module")
+def ambiguous():  # type: ignore[no-untyped-def]
+    return (
+        build_dataset(name="amb-train", count=90, seed=3, corpus="ambiguous"),
+        build_dataset(name="amb-test", count=90, seed=11, corpus="ambiguous"),
+    )
+
+
+def test_ambiguous_corpus_interleaves_multiple_lineages(ambiguous) -> None:  # type: ignore[no-untyped-def]
+    """Its whole purpose: no local window contains a coherent story."""
+    from pocketsec.stage1.labs.ambiguous_corpus import build_ambiguous_corpus
+    from pocketsec.stage1.pipeline import Stage1Pipeline
+
+    pipeline = Stage1Pipeline()
+    counts = []
+    for index, scenario in enumerate(build_ambiguous_corpus(count=12, seed=11)):
+        result = pipeline.run_scenario(scenario, offset=index)
+        counts.append(len({t.actor.identity for t in result.transitions}))
+    assert min(counts) >= 3, "sessions must interleave several concurrent actors"
+
+
+def test_ambiguous_corpus_has_both_classes(ambiguous) -> None:  # type: ignore[no-untyped-def]
+    _, test = ambiguous
+    assert 0 < test.positive_count < len(test)
+
+
+@pytest.mark.slow
+def test_ambiguous_corpus_is_not_saturated(ambiguous) -> None:
+    """The reason this corpus exists.
+
+    Both earlier corpora saturate — the hard one ties five architectures at
+    0.9992, the long one lets two reach 1.0000 — so neither can show that any
+    component helps. A corpus that no model solves perfectly is what makes an
+    ablation informative.
+    """
+    train, test = ambiguous
+    tcn = TCNBaseline(hidden=24, epochs=EPOCHS).fit(train)
+    assert _score(tcn, test) < 0.95, (
+        "the local-burst shortcut is back: this corpus has no headroom and "
+        "cannot justify any DTL component"
+    )
+
+
+@pytest.mark.slow
+def test_router_and_surprise_are_removed_by_default() -> None:
+    """Acceptance criterion 12, applied.
+
+    Both measured harmful on the ambiguous corpus and neutral elsewhere, so
+    neither has an ablation-supported reason to exist.
+    """
+    config = DTLConvConfig()
+    assert config.use_router is False
+    assert config.use_surprise is False
+    assert config.use_multiscale is True
+    assert config.use_maxpool is True

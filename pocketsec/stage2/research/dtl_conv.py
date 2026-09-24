@@ -86,9 +86,16 @@ class DTLConvConfig:
     seed: int = 7
     wake_threshold: float = 0.5
     #: Which mechanisms are active. Ablation flips these off one at a time.
-    use_router: bool = True
+    #: Measured HARMFUL on the ambiguous corpus (-0.115 PR-AUC) and neutral
+    #: elsewhere, so acceptance criterion 12 says remove it. Retained as an
+    #: option for retest, defaulted off.
+    use_router: bool = False
+    #: Measured beneficial: +0.068 PR-AUC on the ambiguous corpus.
     use_multiscale: bool = True
-    use_surprise: bool = True
+    #: Measured HARMFUL on the ambiguous corpus (-0.073 PR-AUC). Same treatment
+    #: as the router.
+    use_surprise: bool = False
+    #: The load-bearing component: +0.046 on ambiguous, +0.66 on long-horizon.
     use_maxpool: bool = True
     #: Train the predictive heads on a DETACHED representation.
     #: Joint training on a shared representation measured -0.67 PR-AUC: the

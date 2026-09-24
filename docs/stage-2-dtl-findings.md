@@ -199,12 +199,81 @@ on the first non-saturated corpus. If they still show nothing there, criterion
    and the recurrent core is superseded.
 2. **Keep heads detached.** Joint training is a −0.67 PR-AUC defect, not a
    tuning choice.
-3. **Build a non-saturated corpus before D2.6–D2.15.** Both existing corpora are
-   saturated — the hard one ties five architectures at 0.9992, the long one lets
-   two models reach 1.0000. Until a corpus has headroom, no further DTL
-   component can be justified by measurement, and building Behaviour Atoms, the
-   lattice and Future Cones on top would repeat the mistake this stage just
-   caught.
+3. **Build a non-saturated corpus before D2.6–D2.15.** — **DONE**, see below.
+
+## The ambiguous corpus, and what it finally allowed
+
+Both earlier corpora saturate. The hard one ties five architectures at 0.9992;
+the long one lets two models reach 1.0000. A solved task has no headroom in
+which a richer representation could show benefit, so neither could justify a
+single component.
+
+`stage1/labs/ambiguous_corpus.py` closes the three shortcuts that made them
+easy:
+
+1. **Sessions interleave 4–5 concurrent actors**, so consecutive events belong
+   to different processes and no fixed window contains a coherent story.
+2. **Benign sessions contain legitimate near-misses** — admins rotating
+   credentials to a remote vault, backup agents uploading secrets — so security
+   potential alone cannot separate the classes.
+3. **Some attacks are partial or spread beyond any dilation**, sitting close to
+   the decision boundary on purpose.
+
+It works: **TCN falls from 1.0000 to 0.5066.** The local-burst shortcut is gone.
+
+### Ablation with headroom (base rate 0.333)
+
+| configuration | PR-AUC | vs full |
+|---|---|---|
+| dtl-conv full | 0.6374 | — |
+| no multi-timescale | 0.5698 | −0.068 → **multiscale helps** |
+| no max-pool | 0.5912 | −0.046 → **max-pool helps** |
+| no Need router | 0.7527 | **+0.115 → router HURTS** |
+| no surprise vector | 0.7107 | **+0.073 → surprise HURTS** |
+| **minus router and surprise** | **0.8137** | **+0.176** |
+
+Components now discriminate in *both* directions, which a saturated corpus can
+never show. Acting on acceptance criterion 12, the Need router and the surprise
+vector are **removed by default**: neither has an ablation-supported reason to
+exist, and both are measurably harmful. They remain available as options for
+retest.
+
+### Against the baselines
+
+| model | PR-AUC | recall@5%FP | params |
+|---|---|---|---|
+| **dtl-conv minus router+surprise** | **0.8137** | **0.5600** | 19,851 |
+| mlp-pooled | 0.8060 | 0.5200 | 4,657 |
+| gru | 0.7232 | — | 8,737 |
+| lstm | 0.6562 | 0.4200 | 11,641 |
+| selective-ssm | 0.6510 | 0.4400 | 7,009 |
+| tcn | 0.5066 | — | 6,961 |
+| markov-bigram | 0.3596 | — | 46 |
+| vq-prototype | 0.3556 | — | 1,152 |
+
+DTL-C edges the best baseline on both PR-AUC and recall at the FP budget — but
+by 0.008 PR-AUC at **4× the parameters**. By this project's own falsification
+rule that is `DTL_COMPARABLE_BUT_COSTLIER`, not a win. **Criterion 1 is still
+not satisfied on detection alone.** DTL must justify its cost through wake rate,
+attribution or robustness, none of which is yet measured.
+
+### Two further results
+
+- **Detached heads confirmed on a third corpus.** Joint training scores 0.3333
+  here too, against 0.8137 detached. The finding is not corpus-specific.
+- **Bigger is worse.** latent=96 scores 0.6071 against latent=48's 0.8137,
+  supporting the spec's "the chosen size is the knee of the measured frontier,
+  not the largest model that fits".
+
+### Note on what this corpus measures
+
+A pooled bag-of-features model reaches 0.8060, close to the best result. That
+suggests much of the remaining signal is *aggregate* — how many high-potential
+events a session contains — rather than the per-lineage long-range structure the
+corpus was designed to require. The corpus is a large improvement on its
+predecessors and is genuinely unsaturated, but it is not yet a clean test of
+long-range lineage tracking. That limitation should be closed before the
+remaining DTL components are judged finally.
 
 ## What is not yet measured
 

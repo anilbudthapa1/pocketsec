@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from pocketsec.stage1.labs.hard_corpus import build_hard_corpus
+from pocketsec.stage1.labs.ambiguous_corpus import build_ambiguous_corpus
 from pocketsec.stage1.labs.longhorizon_corpus import build_long_horizon_corpus
 from pocketsec.stage1.pipeline import ScenarioResult, Stage1Pipeline
 from pocketsec.stage2.encoder.ssir_encoder import (
@@ -144,9 +145,14 @@ def build_dataset(
     on. Sharing a pipeline would let the fit split warm the novelty engine that
     scores the eval split — a subtle and total leak.
     """
-    builder = (
-        build_long_horizon_corpus if corpus == "long" else build_hard_corpus
-    )
+    builders = {
+        "hard": build_hard_corpus,
+        "long": build_long_horizon_corpus,
+        "ambiguous": build_ambiguous_corpus,
+    }
+    if corpus not in builders:
+        raise ValueError(f"unknown corpus {corpus!r}; known: {sorted(builders)}")
+    builder = builders[corpus]
     pipeline = Stage1Pipeline()
     samples: list[Stage2Sample] = []
     for index, scenario in enumerate(
