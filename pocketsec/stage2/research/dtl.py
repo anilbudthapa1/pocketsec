@@ -40,6 +40,8 @@ from pocketsec.stage2.encoder.ssir_encoder import NEED_SIGNAL_INDICES
 from pocketsec.stage2.research.autograd import (
     Tensor,
     binary_cross_entropy,
+    normalised_bce,
+    normalised_cross_entropy,
     concat,
     cross_entropy,
     sigmoid,
@@ -429,7 +431,7 @@ class DTLModel:
 
     def _loss(self, data: dict[str, np.ndarray], output: dict[str, Any]) -> Tensor:
         cfg = self.config
-        loss = binary_cross_entropy(output["detect_logit"], data["labels"]) * cfg.w_detect
+        loss = normalised_bce(output["detect_logit"], data["labels"]) * cfg.w_detect
 
         next_mask = data["next_mask"]
         active_steps = [s for s in range(next_mask.shape[1]) if next_mask[:, s].any()]
@@ -438,20 +440,23 @@ class DTLModel:
             if rows.size == 0:
                 continue
             scale = 1.0 / len(active_steps)
-            loss = loss + cross_entropy(
+            loss = loss + normalised_cross_entropy(
                 output["step_logits"]["relation"][step],
                 data["next_relation"][:, step],
+                _N_RELATIONS,
             ) * (cfg.w_relation * scale)
-            loss = loss + cross_entropy(
-                output["step_logits"]["family"][step], data["next_family"][:, step]
+            loss = loss + normalised_cross_entropy(
+                output["step_logits"]["family"][step], data["next_family"][:, step],
+                _N_FAMILIES,
             ) * (cfg.w_family * scale)
-            loss = loss + binary_cross_entropy(
+            loss = loss + normalised_bce(
                 output["step_logits"]["delta"][step], data["next_delta"][:, step, :]
             ) * (cfg.w_delta * scale)
-            loss = loss + cross_entropy(
-                output["step_logits"]["time"][step], data["next_time"][:, step]
+            loss = loss + normalised_cross_entropy(
+                output["step_logits"]["time"][step], data["next_time"][:, step],
+                _N_TIME_BUCKETS,
             ) * (cfg.w_time * scale)
-            loss = loss + binary_cross_entropy(
+            loss = loss + normalised_bce(
                 output["step_logits"]["phi"][step],
                 data["next_phi"][:, step].reshape(-1, 1),
             ) * (cfg.w_phi * scale)

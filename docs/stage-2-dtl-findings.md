@@ -1,8 +1,12 @@
 # Stage 2 — DTL interim findings (D2.1–D2.5)
 
-**Status:** D2.1–D2.5 implemented and measured. **DTL currently fails Stage 2
-falsification criterion 1 on both corpora.** D2.6–D2.15 are not started, and
-should not be started until the decision below is taken.
+**Status:** D2.1–D2.5 implemented and measured. The recurrent core failed
+falsification criterion 1; it was **replaced with a convolutional core
+(ADR-0009)** which now matches the best baseline. D2.6–D2.15 remain unstarted.
+
+**Resolution in one line:** DTL-C scores **1.0000**, equal to the best baseline,
+but only after detaching the predictive heads — and only max-pooling has an
+ablation-supported reason to exist.
 
 > DTL is a research architecture, not a claim of novelty or superiority. Every
 > component must be compared against strong simple baselines and removed if it
@@ -141,29 +145,66 @@ Each of these produced a confident wrong number first.
 7. **Feature indices into the frozen encoder layout were hardcoded and wrong.**
    Now derived from the layout via `NEED_SIGNAL_INDICES`.
 
+## Resolution: the convolutional redesign (ADR-0009)
+
+Option 1 was taken: replace the recurrent core, keep what was independently
+justified. Multi-timescale state became **multi-dilation causal convolution**
+(dilations 1, 2, 4, 8, 16, 32 — one per timescale block), max-pooling over time
+was added, and the Need router, decay and surprise vector were retained.
+
+### The decisive finding: predictive heads must be detached
+
+| configuration | PR-AUC |
+|---|---|
+| joint heads on a shared representation | 0.3333 |
+| **detached heads** | **1.0000** |
+
+Not a weighting problem: `w_detect=8.0` with joint heads still scored 0.3333,
+and cutting head weights tenfold only reached 0.5537. The heads optimise the
+convolutional features for next-step prediction — dominated by frequent benign
+patterns — and that representation collapses the attack signal.
+
+**This contradicts the Stage 2 thesis as implemented.** The spec's premise is
+that detection emerges from prediction. On this data, jointly training the
+predictive machinery makes detection catastrophically worse, and the
+detection-only model matches the best baseline exactly. That is not a general
+refutation — it says that on a task a local pattern detector already solves
+perfectly, a shared predictive representation is pure cost.
+
+### Ablation: what actually earns its place
+
+Measured with detached heads, on the long-horizon corpus:
+
+| component | PR-AUC without it | verdict |
+|---|---|---|
+| max-pool over time | 0.3396 | **justified** |
+| multi-timescale (6 dilations → 1) | 1.0000 | no measured benefit |
+| Need router | 1.0000 | no measured benefit |
+| surprise vector | 1.0000 | no measured benefit |
+
+Only max-pooling is load-bearing. Acceptance criterion 12 requires every
+surviving component to have an ablation-supported reason to exist, and three do
+not have one yet.
+
+**The honest qualifier: this corpus saturates at 1.0000.** A task that is
+already perfectly solved has no headroom in which a richer representation could
+show benefit. Those three components are therefore *not yet justified* rather
+than *disproven*. They are retained, flagged in ADR-0009, and must be re-tested
+on the first non-saturated corpus. If they still show nothing there, criterion
+12 says remove them.
+
 ## Recommendation
 
-**Do not build D2.6–D2.15 on the current core.** Adding Behaviour Atoms, the
-lattice, Future Cones, the counterfactual twin and the compile-candidate
-exporter on top of a predictive core that loses to a TCN by 0.39 PR-AUC would be
-building machinery on a foundation the evidence does not support.
-
-Three options, in the order I would take them:
-
-1. **Replace DTL's recurrent core with a convolutional or hybrid one**, keeping
-   the parts that are independently justified — the Need router, the
-   multi-timescale decay, the structured surprise vector — and re-measure. The
-   spec permits this: DTL is a research architecture, and section 36 explicitly
-   anticipates simplification.
-2. **Keep the recurrent core but fix the long-horizon learning problem**
-   (per-lineage state, attention over the causal spine, or hierarchical
-   chunking) and re-measure. Higher risk, since three separate recurrent
-   baselines fail the same way.
-3. **Accept the finding and reduce Stage 2's scope** to a TCN-based predictive
-   core plus the DTL components that ablate well, dropping the rest.
-
-The measurement harness, baselines, corpora and falsification machinery are all
-in place, so any of these can be evaluated quickly.
+1. **Ship the convolutional core.** DTL-C matches the best baseline at 1.0000
+   and the recurrent core is superseded.
+2. **Keep heads detached.** Joint training is a −0.67 PR-AUC defect, not a
+   tuning choice.
+3. **Build a non-saturated corpus before D2.6–D2.15.** Both existing corpora are
+   saturated — the hard one ties five architectures at 0.9992, the long one lets
+   two models reach 1.0000. Until a corpus has headroom, no further DTL
+   component can be justified by measurement, and building Behaviour Atoms, the
+   lattice and Future Cones on top would repeat the mistake this stage just
+   caught.
 
 ## What is not yet measured
 

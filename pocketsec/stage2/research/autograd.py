@@ -17,6 +17,8 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
+import math
+
 import numpy as np
 
 __all__ = [
@@ -25,6 +27,8 @@ __all__ = [
     "bmm",
     "concat",
     "cross_entropy",
+    "normalised_bce",
+    "normalised_cross_entropy",
     "relu",
     "sigmoid",
     "softmax",
@@ -268,6 +272,20 @@ class Tensor:
         out._backward = _backward
         return out
 
+    def slice_step(self, step: int) -> Tensor:
+        """Select one time index from a (batch, steps, channels) tensor."""
+        out = self._child(self.data[:, step : step + 1, :], (self,), "slice_step")
+
+        def _backward() -> None:
+            if out.grad is None:
+                return
+            gradient = np.zeros_like(self.data)
+            gradient[:, step : step + 1, :] = out.grad
+            self._accumulate(gradient)
+
+        out._backward = _backward
+        return out
+
     def reshape(self, *shape: int) -> Tensor:
         original = self.data.shape
         out = self._child(self.data.reshape(shape), (self,), "reshape")
@@ -415,6 +433,23 @@ def binary_cross_entropy(logits: Tensor, targets: np.ndarray) -> Tensor:
 
     out._backward = _backward
     return out
+
+
+def normalised_cross_entropy(logits: Tensor, targets: np.ndarray, classes: int) -> Tensor:
+    """Cross-entropy divided by ``ln(classes)``, so it starts at ~1.0.
+
+    Without this a head over 24 relations contributes ln(24)=3.18 at
+    initialisation while a binary head contributes ln(2)=0.69, so the loss
+    weights silently encode vocabulary size instead of priority. In a joint
+    objective with five prediction heads that starved the detection term to 16%
+    of the gradient, and the detection logits came out constant (std 0.016).
+    """
+    return cross_entropy(logits, targets) * (1.0 / math.log(max(classes, 2)))
+
+
+def normalised_bce(logits: Tensor, targets: np.ndarray) -> Tensor:
+    """BCE divided by ``ln(2)``, so it also starts at ~1.0."""
+    return binary_cross_entropy(logits, targets) * (1.0 / math.log(2.0))
 
 
 def softmax(values: np.ndarray, axis: int = -1) -> np.ndarray:
