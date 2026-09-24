@@ -97,10 +97,16 @@ class DTLConvConfig:
     use_surprise: bool = False
     #: The load-bearing component: +0.046 on ambiguous, +0.66 on long-horizon.
     use_maxpool: bool = True
-    #: Pool per ACTOR LINEAGE, then take the worst lineage. Directly answers
-    #: "did any single lineage accumulate dangerous capability", which a flat
-    #: temporal pool cannot express at all.
-    use_lineage_pool: bool = True
+    #: Pool per ACTOR LINEAGE, then take the worst lineage.
+    #:
+    #: Measured to add NOTHING once the attribution corpus was corrected
+    #: (1.0000 with and without). The reason is a positive result for Stage 1:
+    #: its lineage-scoped state calculus (ADR-0005) already performs the
+    #: attribution, so a single transition's delta-phi encodes "this actor,
+    #: given its own history, just did something consequential". Stage 2 does
+    #: not need to re-derive it. Defaulted off per acceptance criterion 12;
+    #: retained for retest on a corpus where Stage 1 cannot attribute.
+    use_lineage_pool: bool = False
     #: Maximum lineage slots tracked per session. Bounded, like everything else.
     max_lineages: int = 8
     #: Train the predictive heads on a DETACHED representation.

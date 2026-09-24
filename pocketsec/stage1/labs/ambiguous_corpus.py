@@ -58,37 +58,68 @@ class ActorRole:
     routine: tuple[tuple[str, dict[str, str]], ...]
 
 
+# Role routines are deliberately **capability-neutral**: loopback networking
+# only, no credential or persistence objects, no privilege change. Stage 1's
+# capability lattices are monotone, so a role that already holds external
+# reachability produces ZERO delta when a chain stage grants it again — which
+# made the chain's marginal contribution invisible and the measured per-lineage
+# peak delta-phi identical (median 0.00) across both classes.
+#
+# This is a controlled experiment: the chain must be the only source of
+# privilege, credential exposure and external reachability, so that "which
+# lineage accumulated capability" is the sole variable. Real hosts of course run
+# processes with external access; isolating the variable costs that realism on
+# purpose, and the limitation is recorded in the findings document.
 _WEB_SERVER = (
-    ("accept", {"raddr": "10.0.0.51", "rport": "51001"}),
+    ("accept", {"raddr": "127.0.0.1", "rport": "51001"}),
     ("read", {"path": "/var/www/index.html"}),
-    ("send", {"raddr": "10.0.0.51", "rport": "51001"}),
+    ("send", {"raddr": "127.0.0.1", "rport": "51001"}),
     ("read", {"path": "/var/www/static/app.js"}),
 )
 _BUILD_AGENT = (
     ("execve", {"path": "/usr/bin/make"}),
     ("read", {"path": "/home/ci/src/app.c"}),
     ("write", {"path": "/home/ci/build/app.o"}),
-    ("execve", {"path": "/usr/bin/python3"}),
     ("fork", {"cpid": "9100"}),
 )
 _LOG_SHIPPER = (
     ("read", {"path": "/var/log/syslog"}),
-    ("connect", {"raddr": "203.0.113.30", "rport": "443"}),
-    ("send", {"raddr": "203.0.113.30", "rport": "443"}),
+    ("connect", {"raddr": "127.0.0.1", "rport": "8125"}),
+    ("send", {"raddr": "127.0.0.1", "rport": "8125"}),
 )
 _DB_WORKER = (
     ("read", {"path": "/var/lib/db/shard-1.dat"}),
     ("write", {"path": "/var/lib/db/wal.log"}),
-    ("connect", {"raddr": "10.0.0.20", "rport": "5432"}),
+    ("connect", {"raddr": "127.0.0.1", "rport": "5432"}),
 )
 _ADMIN_ROUTINE = (
     ("execve", {"path": "/usr/bin/apt"}),
-    ("setuid", {"target_uid": "0"}),
-    ("write", {"path": "/etc/apt/sources.list"}),
     ("read", {"path": "/var/log/dpkg.log"}),
+    ("write", {"path": "/var/cache/apt/state"}),
+)
+_CACHE_NODE = (
+    ("accept", {"raddr": "127.0.0.1", "rport": "6379"}),
+    ("read", {"path": "/var/lib/cache/dump.rdb"}),
+    ("send", {"raddr": "127.0.0.1", "rport": "6379"}),
+)
+_CRON_RUNNER = (
+    ("execve", {"path": "/usr/bin/perl"}),
+    ("read", {"path": "/var/spool/cron/jobs"}),
+    ("write", {"path": "/var/spool/cron/state"}),
+)
+_MAIL_AGENT = (
+    ("read", {"path": "/var/mail/queue/00001"}),
+    ("connect", {"raddr": "127.0.0.1", "rport": "25"}),
+    ("send", {"raddr": "127.0.0.1", "rport": "25"}),
 )
 
+#: Eight roles, so a session has enough distinct actors to spread the longest
+#: chain (5 stages) one stage per actor. With a smaller pool the spread had to
+#: reuse actors, recreating the single-lineage pattern in benign sessions.
 _ROLE_POOL: tuple[tuple[str, tuple[tuple[str, dict[str, str]], ...]], ...] = (
+    ("cache", _CACHE_NODE),
+    ("cron", _CRON_RUNNER),
+    ("mail", _MAIL_AGENT),
     ("web", _WEB_SERVER),
     ("build", _BUILD_AGENT),
     ("shipper", _LOG_SHIPPER),
@@ -133,13 +164,22 @@ _MORE_CHAINS: tuple[tuple[tuple[str, dict[str, str]], ...], ...] = (
 _CHAIN_POOL = _CHAIN_POOL + _MORE_CHAINS
 
 
-def _make_roles(rng: random.Random, count: int) -> list[ActorRole]:
+def _make_roles(rng: random.Random, count: int, session: int) -> list[ActorRole]:
+    """Build this session's actors with **session-unique** process identities.
+
+    The identity must be unique per session. Stage 1 keys lineage state on
+    boot+pid+start-time and carries that state forward, so reusing pids across
+    sessions let capability accumulate between them: by the second session every
+    lineage already held privilege and credential exposure, every chain stage
+    produced zero delta-phi, and the median per-lineage peak came out 0.00 for
+    both classes. The attribution signal was being erased before any model saw it.
+    """
     chosen = rng.sample(_ROLE_POOL, min(count, len(_ROLE_POOL)))
     return [
         ActorRole(
             name=name,
-            pid=str(2000 + index * 7),
-            start_time=str(100 + index),
+            pid=str(100_000 + session * 100 + index),
+            start_time=str(1_000 + session * 10 + index),
             routine=routine,
         )
         for index, (name, routine) in enumerate(chosen)
@@ -196,7 +236,7 @@ def _interleave(
             _behaviour(actor, operation, fields, rng.randrange(2, 90) * _SECOND_NS)
         )
 
-    candidates = [r for r in roles if r.name != "admin"] or roles
+    candidates = list(roles)
     owner = rng.choice(candidates)
     # Stages are spread with a wide stride so no window of any dilation used by
     # DTL-C (up to 32) spans two stages of the same chain.
@@ -204,8 +244,19 @@ def _interleave(
     stride = max(20, span // max(len(chain), 1))
     position = rng.randrange(1, max(2, span - stride * (len(chain) - 1)))
 
+    # Benign stages go to DISTINCT actors. Sampling with replacement put two or
+    # three stages on one actor by chance in some benign sessions, making them
+    # indistinguishable from the malicious case and effectively mislabelled —
+    # self-inflicted noise that capped every model at ~0.48 PR-AUC.
+    if not single_lineage and len(candidates) < len(chain):
+        raise RuntimeError(
+            f"only {len(candidates)} actors for a {len(chain)}-stage chain; "
+            "benign spread would have to reuse an actor and recreate the "
+            "single-lineage pattern this corpus exists to isolate"
+        )
+    spread = rng.sample(candidates, k=len(chain)) if not single_lineage else []
     for offset, (operation, fields) in enumerate(chain):
-        actor = owner if single_lineage else rng.choice(candidates)
+        actor = owner if single_lineage else spread[offset]
         at = min(position + offset * stride + rng.randrange(-4, 5), len(stream))
         stream.insert(
             max(0, at),
@@ -228,7 +279,7 @@ def build_ambiguous_corpus(
     scenarios: list[Scenario] = []
 
     for index in range(count):
-        roles = _make_roles(rng, rng.randrange(4, 6))
+        roles = _make_roles(rng, rng.randrange(7, 9), session=index)
         length = rng.randrange(50, 90)
         malicious = split != "train" and index % 3 == 0
         # Both classes draw from the SAME chain pool. A chain is neither benign

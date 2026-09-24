@@ -316,6 +316,9 @@ lineages. It is the single largest improvement measured in Stage 2 so far —
 **+0.042 PR-AUC and +80% recall at the FP budget** (0.10 → 0.18) — and it makes
 DTL-C the best model in the suite for the first time.
 
+> **This result was later retracted.** See "RETRACTED" below: it was measuring
+> label noise from two corpus defects, and does not survive fixing them.
+
 It required adding an **actor slot** to the encoding: an opaque index of the
 acting lineage *within one session*, assigned by order of first appearance.
 
@@ -326,6 +329,55 @@ not a feature and not an identity: it carries no name, no pid, no global meaning
 and no cross-session information, so there is nothing to memorise. It is a
 grouping key, and grouping is exactly the operation the measurement shows is
 missing.
+
+### RETRACTED: the lineage-pooling gain was measuring my own label noise
+
+The +0.042 PR-AUC attributed to per-lineage pooling above **does not survive**
+fixing the corpus. Two defects were inflating it, both mine:
+
+1. **Benign chain stages were assigned to actors with replacement**, so 50 of 80
+   benign sessions landed two or more stages on one actor and were effectively
+   mislabelled. Fixed by sampling distinct actors and enlarging the role pool
+   from 5 to 8 so the longest chain always fits: now 0 of 100.
+2. **Role process identities were reused across sessions.** Stage 1 keys lineage
+   state on boot+pid+start-time and carries it forward, so by the second session
+   every lineage already held privilege and credential exposure, every chain
+   stage produced zero delta-phi, and the measured median per-lineage peak was
+   **0.00 for both classes**. The attribution signal was being erased before any
+   model saw it. Fixed with session-unique identities: benign median 2.25,
+   malicious median 8.00.
+
+A third change was needed to isolate the variable at all: role routines were
+made **capability-neutral** (loopback only, no credential or persistence
+objects, no privilege change). Stage 1's lattices are monotone, so a role that
+already holds external reachability yields no delta when a chain stage grants it
+again — the chain's marginal contribution was invisible.
+
+### The corrected result, and what it actually shows
+
+| model | PR-AUC | recall@5%FP |
+|---|---|---|
+| tcn | **1.0000** | 1.0000 |
+| dtl-conv, no lineage pool | **1.0000** | 1.0000 |
+| dtl-conv + lineage pool | **1.0000** | 1.0000 |
+| mlp-pooled | 0.9415 | 0.8600 |
+| phi-oracle | 0.7484 | 0.6200 |
+| gru | 0.6269 | 0.2600 |
+
+**Per-lineage pooling adds nothing** — identical scores with and without. It is
+defaulted off per acceptance criterion 12.
+
+The reason is a **positive result for Stage 1**. Its lineage-scoped state
+calculus (ADR-0005) already performs the attribution: because state accumulates
+per lineage, a single transition's ΔΦ encodes "this actor, *given its own
+history*, just did something consequential". A benign reader with no privilege
+produces a small ΔΦ; the accumulating lineage produces a large one. Stage 2 does
+not need to re-derive lineage grouping, because Stage 1 handed it over already.
+
+That also explains the intermediate state: with capability-overlapping roles the
+signal was muddied and *nothing* learned it (all models 0.32–0.40); with
+capability-neutral roles Stage 1 attributes cleanly and *everything* learns it.
+There was no middle band in which Stage 2 machinery could add value.
 
 ### Honest reading of the absolute numbers
 

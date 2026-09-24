@@ -196,19 +196,24 @@ def test_ambiguous_corpus_has_both_classes(ambiguous) -> None:  # type: ignore[n
 
 
 @pytest.mark.slow
-def test_ambiguous_corpus_is_not_saturated(ambiguous) -> None:
-    """The reason this corpus exists.
+def test_ambiguous_corpus_is_currently_saturated(ambiguous) -> None:
+    """Records a known blocker rather than asserting a property we want.
 
-    Both earlier corpora saturate — the hard one ties five architectures at
-    0.9992, the long one lets two reach 1.0000 — so neither can show that any
-    component helps. A corpus that no model solves perfectly is what makes an
-    ablation informative.
+    After the corpus defects were fixed, Stage 1's lineage-scoped state calculus
+    attributes cleanly enough that a plain TCN scores 1.0000. The corpus is
+    therefore saturated again and **cannot justify any further Stage 2
+    component**, which is why D2.6 has not been started.
+
+    This test asserts the state as measured. If someone makes the corpus harder,
+    it will fail — and that is the intent: the failure is a prompt to update
+    PROGRESS.md and re-run the component ablations, not a regression.
     """
     train, test = ambiguous
     tcn = TCNBaseline(hidden=24, epochs=EPOCHS).fit(train)
-    assert _score(tcn, test) < 0.95, (
-        "the local-burst shortcut is back: this corpus has no headroom and "
-        "cannot justify any DTL component"
+    assert _score(tcn, test) >= 0.95, (
+        "the corpus is no longer saturated — good. Re-run the DTL component "
+        "ablations and update the Stage 2 findings before relying on the old "
+        "verdicts."
     )
 
 
@@ -270,13 +275,32 @@ def test_ambiguous_corpus_is_aggregate_matched() -> None:
 
 
 @pytest.mark.slow
-def test_lineage_pooling_helps_on_an_attribution_task(ambiguous) -> None:  # type: ignore[no-untyped-def]
-    """The largest single improvement measured in Stage 2.
+def test_lineage_pooling_adds_nothing_because_stage1_already_attributes(
+    ambiguous,
+) -> None:  # type: ignore[no-untyped-def]
+    """Pins a RETRACTED result, so it cannot quietly come back.
 
-    A flat temporal pool cannot express "did any one lineage accumulate
-    dangerous capability". Pooling within each lineage and taking the worst
-    lineage asks that question directly.
+    An earlier measurement credited per-lineage pooling with +0.042 PR-AUC. It
+    was measuring label noise from two corpus defects: benign chain stages
+    sampled with replacement, and role pids reused across sessions so Stage 1's
+    carried-forward lineage state saturated (median ΔΦ 0.00 for *both* classes).
+
+    Corrected, pooling changes nothing — and the reason is a positive result for
+    Stage 1. Its lineage-scoped state calculus (ADR-0005) already performs the
+    attribution: a single transition's ΔΦ encodes "this actor, given its own
+    history, just did something consequential". Stage 2 does not need to
+    re-derive lineage grouping, so the component is defaulted off per acceptance
+    criterion 12.
     """
     _, with_pool = _train(ambiguous, use_lineage_pool=True)
     _, without_pool = _train(ambiguous, use_lineage_pool=False)
-    assert with_pool > without_pool
+    assert abs(with_pool - without_pool) < 0.02, (
+        f"lineage pooling now changes the result ({with_pool:.4f} vs "
+        f"{without_pool:.4f}). Re-open the criterion-12 verdict and update "
+        "ADR-0009 before relying on the default."
+    )
+
+
+def test_lineage_pooling_is_off_by_default() -> None:
+    """Criterion 12: no measured benefit, so it does not ship on."""
+    assert DTLConvConfig().use_lineage_pool is False
