@@ -1,6 +1,9 @@
 # Stage 2 — DTL interim findings (D2.1–D2.5)
 
-**Status:** D2.1–D2.5 implemented and measured. The recurrent core failed
+**Status:** D2.1–D2.5 implemented and measured. **DTL is rejected (ADR-0010);
+the Stage 2 core reduces to a TCN.** See "Final verdict" at the end.
+
+**Original status:** D2.1–D2.5 implemented and measured. The recurrent core failed
 falsification criterion 1; it was **replaced with a convolutional core
 (ADR-0009)** which now matches the best baseline. D2.6–D2.15 remain unstarted.
 
@@ -405,3 +408,48 @@ land on distinct actors), which would remove the self-inflicted label noise.
   correct by design, but it means the current number measures the policy, not
   the model.
 - All corpora remain synthetic. No result here is a detection claim.
+
+
+---
+
+## Final verdict (ADR-0010): DTL is rejected
+
+Detection stopped discriminating after four corpora — every architecture either
+ties at 1.0000 or sits at the base rate. Falsification criterion 1 explicitly
+permits DTL to survive on **wake rate, attribution or robustness** instead, so
+the sleeping-brain benchmark (spec section 33, "a defining experiment") measured
+the first of those.
+
+| model | PR-AUC | µs/event | params | cheap-path share |
+|---|---|---|---|---|
+| **tcn** | **1.0000** | **6.6** | 6,961 | — |
+| dtl-conv | 1.0000 | 22.3 | 19,851 | 100% |
+| mlp-pooled | 0.9415 | 3.2 | 4,657 | — |
+| lstm | 0.7902 | 11.3 | 11,641 | — |
+| **phi-oracle** | **0.7484** | **0.0** | **0** | — |
+| selective-ssm | 0.6669 | 7.4 | 7,009 | — |
+| gru | 0.6269 | 8.6 | 8,737 | — |
+| vq-prototype | 0.4240 | 3.3 | 1,152 | — |
+| markov-bigram | 0.3970 | 0.5 | 64 | — |
+
+**DTL-C is dominated**: identical detection, **3.4× the per-event cost**, 2.8×
+the parameters.
+
+And the router is worse than useless. It reports **100% of events resolved on
+cheap paths** while the model remains 3.4× slower than the TCN. The path
+accounting is notional — every branch is computed regardless of its gate — so
+routing labels work rather than avoiding it. The mechanism meant to deliver
+"computation proportional to novelty" reduces no computation at all.
+
+### Two results worth carrying forward
+
+**Stage 1 is vindicated.** The phi-oracle — no model, no parameters, no
+measurable inference time — reaches **0.7484** purely from Stage 1's
+lineage-scoped state calculus. About three quarters of the task is solved by the
+*representation* before any Stage 2 model exists. That is the strongest result
+in the project, and an argument for investing in Stage 1's ontology rather than
+Stage 2's machinery.
+
+**Synthetic data cannot settle this.** Four corpora produced only trivial or
+impossible tasks, with no middle band. That pattern is itself evidence: real
+telemetry is needed before a predictive core can be judged.
