@@ -16,11 +16,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Mapping
 
 from pocketsec.stage0.contracts.common import register_schema
 
 __all__ = [
+    "ABLATION_SLOTS",
     "CORE_IDS",
     "DTL_INTERFACE_ID",
     "DTL_INTERFACE_VERSION",
@@ -57,8 +58,21 @@ class ExecutionPath(StrEnum):
 
 
 #: Relative cost weights for the execution paths, used to report a single
-#: comparable "compute units per event" figure. Calibrated from measured CPU
-#: time in `research.sleeping_brain`, not assumed.
+#: comparable "compute units per event" figure.
+#:
+#: **UNCALIBRATED.** An earlier version of this comment claimed these weights
+#: were "calibrated from measured CPU time in `research.sleeping_brain`". They
+#: are not: `research/sleeping_brain.py` reads `PATH_COST_UNITS` to *weight* a
+#: report and contains no code that fits these numbers to anything, and no
+#: calibration code exists anywhere in this repository. The claim is removed
+#: rather than softened (S2-FC-11). `cache/transition_cache.py` and
+#: `router/accounting.py` already said so; this file now agrees with them.
+#:
+#: They are therefore policy weights that fix an *ordering* — a cached answer is
+#: cheaper than a lattice lookup is cheaper than a state update is cheaper than
+#: predictive inference is cheaper than a counterfactual — and the ordering is
+#: what `_derive_path` uses. The only measured cost figure in Stage 2 remains
+#: wall-clock µs/event.
 PATH_COST_UNITS: dict[ExecutionPath, float] = {
     ExecutionPath.P0_COMPILED: 1.0,
     ExecutionPath.P1_LATTICE: 2.0,
@@ -238,3 +252,41 @@ REQUIRED_IDS = frozenset(
 )
 
 assert len(CORE_IDS) == 20, "the spec defines exactly twenty core functional IDs"
+
+#: Which core functions each ablation *slot* measures, keyed by the ``slot_name``
+#: the research CLI writes into ``experiments/registry.jsonl``.
+#:
+#: This is the seam that lets G2.12 be a criterion rather than a row count.
+#: The check used to be ``len(this_wave) >= len(optional)`` — a bare comparison
+#: of two integers with nothing mapping a registered experiment to a component
+#: and nothing inspecting what any of them measured — so appending rows about
+#: anything at all, including reruns of one ablation or components already
+#: rejected, flipped it to PASS while leaving every OPTIONAL core id exactly as
+#: unjustified as before (S2-AUTH-09 / S2-FC-02).
+#:
+#: It lives here, in runtime code, because the gate may not import research
+#: (ADR-0008) and the registry rows carry only a slot name. A runtime module
+#: therefore has to know what a slot name means. ``tests/test_stage2_report.py``
+#: asserts this table agrees with the ``core_ids=`` the report actually mints,
+#: so the two cannot drift apart silently.
+ABLATION_SLOTS: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "behaviour_atom_quantizer": ("DTL-F04",),
+        "transition_lattice": ("DTL-F04",),
+        "multiscale_window": ("DTL-F03",),
+        "merge_fission": ("DTL-F13", "DTL-F14"),
+        "future_cone": ("DTL-F05",),
+        "hazard_heads": ("DTL-F08",),
+        "uncertainty": ("DTL-F07",),
+        "transition_cache": ("DTL-F16",),
+        "utility_forgetting": ("DTL-F15",),
+        "compile_candidate_export": ("DTL-F17", "DTL-F20"),
+        "epoch_guard": ("DTL-F18",),
+        "quarantine_promotion": ("DTL-F19",),
+        "causal_credit": ("DTL-F10", "DTL-F11"),
+    }
+)
+
+assert set(ABLATION_SLOTS) and all(
+    core_id in CORE_IDS for ids in ABLATION_SLOTS.values() for core_id in ids
+), "an ablation slot names a core id that does not exist"

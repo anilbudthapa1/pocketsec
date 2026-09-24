@@ -15,11 +15,17 @@ license = { text = "Proprietary" }
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
+# numpy is a DEV dependency only: it is permitted inside stage*/research/
+# (ADR-0008) and the test suite exercises that code, so the `test` CI job needs
+# it. The `gate` job installs the package bare, which is why every gate is
+# stdlib-only.
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11", "numpy>=1.26"]
 
 [project.scripts]
 pocketsec-stage0 = "pocketsec.stage0.cli:main"
 pocketsec-stage1 = "pocketsec.stage1.cli:main"
+pocketsec-stage2 = "pocketsec.stage2.cli:main"
+pocketsec-stage3 = "pocketsec.stage3.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["pocketsec*"]

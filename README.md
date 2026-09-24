@@ -28,6 +28,10 @@ python -m pocketsec.stage0.cli smoke        # H0 baseline through the harness
 python -m pocketsec.stage1.cli gate         # Stage 1 gate, 13 criteria
 python -m pocketsec.stage1.cli adversarial  # 8 adversarial representation tests
 python -m pocketsec.stage1.cli guillotine   # measured representation frontier
+python -m pocketsec.stage2.cli gate         # Stage 2 gate, 13 criteria (exits 1: see ADR-0113)
+python -m pocketsec.stage2.cli runtime      # stdlib runtime path + the work ledger
+python -m pocketsec.stage2.cli resources    # Stage 2 cost against the Edge profile
+python -m pocketsec.stage2.research.cli frontier   # baseline suite (needs numpy)
 PYTHONHASHSEED=0 python -m pytest -q        # test suite
 ```
 

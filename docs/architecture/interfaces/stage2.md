@@ -866,7 +866,16 @@ marked otherwise.
     (`sleeping_brain.py:60`, fed `test.transition_count` at
     `sleeping_brain.py:128`). Mixing the two silently rescales every cost figure
     by the mean sequence length (measured `73.1` on one 40-sample ambiguous
-    split).
+    split). **This trap was live and caught one victim:**
+    `gate_criteria.scorer_microseconds` timed `PHI_ORACLE_SCORER.evaluate(window)`
+    — which is O(steps in the window) — and divided by `len(windows)`, producing
+    microseconds per *window* and handing it to a field named
+    `microseconds_per_event` on the exported compile candidate. Measured on the
+    gate's own split: `7.3718` under the window denominator against `0.4940` per
+    step (292 windows, 4,357 steps, 14.92 steps/window), and the corrected
+    figure `0.134` agrees with the independently measured ~0.1 µs/event while the
+    old one did not. The factor varies with session length, so the same
+    zero-parameter scorer reported a different "cost" on every corpus (S2-FC-05).
 27. **`DTL_BLOCKS` and `DTLC_BLOCKS` list the six blocks in *different
     orders*.** `DTL_BLOCKS` = fast, session, host, epoch, causal, uncertainty
     (`dtl.py:55`). `DTLC_BLOCKS` = fast, uncertainty, session, causal, host,
