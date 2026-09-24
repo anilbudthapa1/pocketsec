@@ -125,9 +125,18 @@ def _encode(result: ScenarioResult, index: int) -> Stage2Sample | None:
     """Encode one compiled scenario, or ``None`` if it produced no transitions."""
     if not result.transitions:
         return None
+    slots: dict[str, int] = {}
+    encoded_steps = []
+    for transition in result.transitions:
+        identity = transition.actor.identity
+        if identity not in slots:
+            slots[identity] = len(slots)
+        encoded_steps.append(
+            encode_ssir_transition(transition, actor_slot=slots[identity])
+        )
     return Stage2Sample(
         sample_id=f"{result.scenario.name}-{index:04d}",
-        steps=tuple(encode_ssir_transition(t) for t in result.transitions),
+        steps=tuple(encoded_steps),
         label=result.scenario.label,
         technique=result.scenario.technique,
         unseen_technique=result.scenario.unseen_technique,

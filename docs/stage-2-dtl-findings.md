@@ -265,15 +265,81 @@ attribution or robustness, none of which is yet measured.
   supporting the spec's "the chosen size is the knee of the measured frontier,
   not the largest model that fits".
 
-### Note on what this corpus measures
+### Closing the aggregate leak
 
-A pooled bag-of-features model reaches 0.8060, close to the best result. That
-suggests much of the remaining signal is *aggregate* — how many high-potential
-events a session contains — rather than the per-lineage long-range structure the
-corpus was designed to require. The corpus is a large improvement on its
-predecessors and is genuinely unsaturated, but it is not yet a clean test of
-long-range lineage tracking. That limitation should be closed before the
-remaining DTL components are judged finally.
+The first version of this corpus leaked: malicious sessions simply contained
+*more* injected events, and a pooled bag-of-features model could count them
+(0.8060). The corpus is now **aggregate-matched by construction** — every
+session, benign or malicious, receives exactly the same chain, the same
+operations, on the same object classes, the same number of times. The only
+difference is **attribution**:
+
+* malicious — one lineage performs every stage,
+* benign — the stages are spread across unrelated processes, each of which did
+  one ordinary thing.
+
+Measured operation counts per session now match across classes within noise
+(`read` 23.7 vs 24.7, `setuid` 4.6 vs 5.1, `connect` 9.8 vs 9.5, and so on), so
+a model that pools over the session sees two identical distributions.
+
+### The result: a real capability gap
+
+| model | PR-AUC | recall@5%FP | params |
+|---|---|---|---|
+| **dtl-conv + lineage pool** | **0.4771** | **0.1800** | 21,387 |
+| tcn | 0.4675 | 0.0800 | 6,961 |
+| mlp-pooled | 0.4597 | 0.1200 | 4,657 |
+| dtl-conv, no lineage pool | 0.4348 | 0.1000 | 19,851 |
+| lineage pool without max-pool | 0.3539 | 0.0400 | 19,851 |
+| **phi-oracle (no learning)** | **0.3360** | 0.0400 | 0 |
+| gru | 0.3076 | 0.0000 | 8,737 |
+
+Base rate 0.333.
+
+**Stage 1's representation does not solve attribution on its own.** The
+Φ-oracle — which simply takes the largest single-transition ΔΦ, computed by
+Stage 1 against the lineage's accumulated state — scores 0.3360, essentially
+chance. The roles in these sessions already hold overlapping capabilities (a log
+shipper legitimately has external reachability), so a benign lineage handed one
+chain stage can fire an interaction term just as a malicious one does.
+
+**None of the architectures could group by actor.** Every baseline sees a flat
+sequence of transitions. The corpus asks "did any *single lineage* accumulate
+dangerous capability", and no amount of temporal convolution or recurrence can
+express that question. This is a genuine capability gap, and finding it is what
+the aggregate-matched design was for.
+
+### Per-lineage pooling, and what it costs
+
+DTL-C gained a two-stage pool: mean within each lineage, then max across
+lineages. It is the single largest improvement measured in Stage 2 so far —
+**+0.042 PR-AUC and +80% recall at the FP budget** (0.10 → 0.18) — and it makes
+DTL-C the best model in the suite for the first time.
+
+It required adding an **actor slot** to the encoding: an opaque index of the
+acting lineage *within one session*, assigned by order of first appearance.
+
+This refines ADR-0007 rather than contradicting it. That ADR froze
+`exact_identity` out of the model-facing encoding because identity as a
+*feature* was measurably redundant and invited memorisation. The actor slot is
+not a feature and not an identity: it carries no name, no pid, no global meaning
+and no cross-session information, so there is nothing to memorise. It is a
+grouping key, and grouping is exactly the operation the measurement shows is
+missing.
+
+### Honest reading of the absolute numbers
+
+Every model scores between 0.31 and 0.48 against a 0.333 base rate. The corpus
+is *hard*, and probably harder than it should be: benign chain stages are
+assigned to actors at random, so some benign sessions land two or three stages
+on one actor by chance and are effectively mislabelled. That is irreducible
+noise of my own making, and it caps what any model can reach.
+
+So the ranking here is informative — per-lineage pooling clearly helps, Stage 1
+alone clearly does not suffice — but the absolute values are not a detection
+result and the margins are narrow. Before these numbers carry real weight the
+benign assignment should be made explicitly anti-correlated (guarantee stages
+land on distinct actors), which would remove the self-inflicted label noise.
 
 ## What is not yet measured
 

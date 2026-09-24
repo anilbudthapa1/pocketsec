@@ -157,6 +157,16 @@ class EncodedTransition:
     delta_phi: float
     object_property_mask: int
     epoch_id: int
+    #: Opaque index of the acting lineage *within this session* (0, 1, 2...),
+    #: assigned by order of first appearance.
+    #:
+    #: This is a GROUPING KEY, not an identity feature. It carries no global
+    #: meaning, no name, no pid and no cross-session information, so it cannot
+    #: be memorised the way ADR-0007 forbids. It exists because a model cannot
+    #: answer "did any single lineage accumulate dangerous capability" without
+    #: knowing which events belong to the same lineage — and on an
+    #: aggregate-matched corpus that question is the entire signal.
+    actor_slot: int = 0
     #: Evidence locators, carried through so a prediction can be bound back to
     #: immutable Stage 1 evidence (DTL-F20). Never used as a model feature.
     evidence: tuple[str, ...] = ()
@@ -182,7 +192,9 @@ def _property_mask(asserted: frozenset[SemanticProperty]) -> int:
     return mask
 
 
-def encode_ssir_transition(transition: SSIRTransitionV1) -> EncodedTransition:
+def encode_ssir_transition(
+    transition: SSIRTransitionV1, *, actor_slot: int = 0
+) -> EncodedTransition:
     """DTL-F01. Deterministic, allocation-light, stdlib only."""
     features: list[float] = []
 
@@ -243,5 +255,6 @@ def encode_ssir_transition(transition: SSIRTransitionV1) -> EncodedTransition:
         delta_phi=phi,
         object_property_mask=_property_mask(object_asserted),
         epoch_id=transition.epoch_id,
+        actor_slot=actor_slot,
         evidence=tuple(ref.locator for ref in transition.evidence),
     )

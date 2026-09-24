@@ -21,6 +21,7 @@ from typing import Any, Protocol
 import numpy as np
 
 from pocketsec.stage2.dataset import Stage2Dataset, Stage2Sample
+from pocketsec.stage2.encoder.ssir_encoder import NEED_SIGNAL_INDICES
 from pocketsec.stage2.research.autograd import (
     Tensor,
     binary_cross_entropy,
@@ -39,6 +40,7 @@ __all__ = [
     "Stage2Model",
     "TCNBaseline",
     "TransformerBaseline",
+    "PhiOracleBaseline",
     "VQPrototypeBaseline",
     "build_baselines",
 ]
@@ -546,7 +548,39 @@ class VQPrototypeBaseline:
         }
 
 
+@dataclass
+class PhiOracleBaseline:
+    """The complexity sanity check (spec section 28): no learning at all.
+
+    Scores a session by the largest single-transition ΔΦ it contains. Stage 1
+    computes ΔΦ against the *lineage's* accumulated state (ADR-0005), so a
+    lineage that completes a dangerous capability combination produces one large
+    value and three unrelated processes each doing one step do not.
+
+    This measures how much of the task Stage 1's representation already solves
+    before any Stage 2 model is involved. If it matches the learned models, the
+    learning is not where the value is — and that is worth knowing before
+    building Behaviour Atoms on top of it.
+    """
+
+    name: str = "phi-oracle"
+
+    def fit(self, dataset: Stage2Dataset) -> PhiOracleBaseline:
+        return self  # nothing to learn
+
+    def predict_scores(self, dataset: Stage2Dataset) -> list[float]:
+        index = NEED_SIGNAL_INDICES["delta_phi"]
+        return [
+            max((step.features[index] for step in sample.steps), default=0.0)
+            for sample in dataset.samples
+        ]
+
+    def resource_profile(self) -> dict[str, Any]:
+        return {"parameters": 0, "model_bytes_fp32": 0, "hidden": 0, "final_loss": None}
+
+
 BASELINE_REGISTRY: dict[str, type] = {
+    "phi-oracle": PhiOracleBaseline,
     "markov-bigram": MarkovBaseline,
     "mlp-pooled": MLPBaseline,
     "gru": GRUBaseline,
@@ -561,6 +595,7 @@ BASELINE_REGISTRY: dict[str, type] = {
 def build_baselines(*, hidden: int = 32, epochs: int = DEFAULT_EPOCHS) -> list[Any]:
     """Instantiate every baseline with identical training budget."""
     return [
+        PhiOracleBaseline(),
         MarkovBaseline(),
         MLPBaseline(name="mlp-pooled", hidden=hidden, epochs=epochs),
         GRUBaseline(name="gru", hidden=hidden, epochs=epochs),

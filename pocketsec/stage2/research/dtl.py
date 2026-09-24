@@ -163,12 +163,14 @@ def _pad(samples: tuple[Stage2Sample, ...]) -> dict[str, np.ndarray]:
     next_delta = np.zeros((rows, longest, _N_DIMENSIONS))
     next_time = np.zeros((rows, longest), dtype=np.int64)
     next_phi = np.zeros((rows, longest))
+    actor_slot = np.full((rows, longest), -1, dtype=np.int64)
 
     for row, sample in enumerate(samples):
         labels[row, 0] = sample.label
         for step, encoded in enumerate(sample.steps):
             batch[row, step] = encoded.features
             mask[row, step] = 1.0
+            actor_slot[row, step] = encoded.actor_slot
             if step + 1 < len(sample.steps):
                 following = sample.steps[step + 1]
                 next_mask[row, step] = 1.0
@@ -191,6 +193,7 @@ def _pad(samples: tuple[Stage2Sample, ...]) -> dict[str, np.ndarray]:
         "next_delta": next_delta,
         "next_time": next_time,
         "next_phi": next_phi,
+        "actor_slot": actor_slot,
     }
 
 

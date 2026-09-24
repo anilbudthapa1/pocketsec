@@ -97,6 +97,12 @@ class DTLConvConfig:
     use_surprise: bool = False
     #: The load-bearing component: +0.046 on ambiguous, +0.66 on long-horizon.
     use_maxpool: bool = True
+    #: Pool per ACTOR LINEAGE, then take the worst lineage. Directly answers
+    #: "did any single lineage accumulate dangerous capability", which a flat
+    #: temporal pool cannot express at all.
+    use_lineage_pool: bool = True
+    #: Maximum lineage slots tracked per session. Bounded, like everything else.
+    max_lineages: int = 8
     #: Train the predictive heads on a DETACHED representation.
     #: Joint training on a shared representation measured -0.67 PR-AUC: the
     #: heads optimise the conv features for next-step prediction, which is
@@ -180,6 +186,8 @@ class DTLConvModel:
         self.head_phi = (self._parameter(latent, 1), self._bias(1))
 
         detect_width = latent * (2 if self.config.use_maxpool else 1)
+        if self.config.use_lineage_pool:
+            detect_width += latent
         if self.config.use_surprise:
             detect_width += 6
         self.detect_w1 = self._parameter(detect_width, 32)
@@ -274,6 +282,9 @@ class DTLConvModel:
         head_input = (
             Tensor(latent_seq.data) if self.config.detach_heads else latent_seq
         )
+        if self.config.use_lineage_pool:
+            parts.append(self._lineage_pool(latent_seq, data, rows, steps, latent_width))
+
         step_logits = self._heads(head_input, rows, steps, latent_width)
         surprise = DTLModel._surprise_summary(data, step_logits)
         if self.config.use_surprise:
@@ -299,6 +310,48 @@ class DTLConvModel:
             result["surprise"] = surprise
             result["need"] = need
         return result
+
+    def _lineage_pool(
+        self,
+        latent_seq: Tensor,
+        data: dict[str, np.ndarray],
+        rows: int,
+        steps: int,
+        width: int,
+    ) -> Tensor:
+        """Mean-pool within each lineage, then take the max across lineages.
+
+        Two-stage by design. Pooling within a lineage accumulates what that one
+        actor did across the whole session, however far apart its events sit.
+        Taking the max across lineages asks the security question directly: is
+        there *any* actor whose accumulated behaviour is alarming? A flat pool
+        averages that actor away among its well-behaved neighbours.
+        """
+        slots = data["actor_slot"]
+        mask = data["mask"]
+        limit = self.config.max_lineages
+        selector = np.zeros((rows, steps, width))
+        best = np.full((rows, width), -1e18)
+        per_slot: list[np.ndarray] = []
+
+        for slot in range(limit):
+            member = ((slots == slot) & (mask > 0)).astype(np.float64)
+            count = np.maximum(member.sum(axis=1, keepdims=True), 1.0)
+            pooled = (latent_seq.data * member[..., None]).sum(axis=1) / count
+            pooled = np.where(member.sum(axis=1, keepdims=True) > 0, pooled, -1e18)
+            per_slot.append(pooled)
+
+        stacked = np.stack(per_slot, axis=0)
+        winner = np.argmax(stacked, axis=0)
+        for row in range(rows):
+            for channel in range(width):
+                slot = winner[row, channel]
+                member = (slots[row] == slot) & (mask[row] > 0)
+                total = member.sum()
+                if total:
+                    selector[row, member, channel] = 1.0 / total
+        assert best is not None
+        return (latent_seq * Tensor(selector)).sum(axis=1)
 
     def _heads(
         self, latent_seq: Tensor, rows: int, steps: int, width: int

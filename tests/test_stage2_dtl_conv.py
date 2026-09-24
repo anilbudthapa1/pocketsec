@@ -224,3 +224,59 @@ def test_router_and_surprise_are_removed_by_default() -> None:
     assert config.use_surprise is False
     assert config.use_multiscale is True
     assert config.use_maxpool is True
+
+
+def test_actor_slot_is_a_grouping_key_not_an_identity() -> None:
+    """Refines ADR-0007 rather than contradicting it.
+
+    The slot is local to one session and assigned by order of first appearance,
+    so it carries no name, no pid and no cross-session meaning. Two sessions
+    with completely different processes both start at slot 0, so there is
+    nothing to memorise.
+    """
+    first = build_dataset(name="a", count=8, seed=11, corpus="ambiguous")
+    second = build_dataset(name="b", count=8, seed=3, corpus="ambiguous")
+    for dataset in (first, second):
+        for sample in dataset.samples:
+            slots = sorted({step.actor_slot for step in sample.steps})
+            assert slots[0] == 0, "slots must be session-local and start at 0"
+            assert slots == list(range(len(slots))), "slots must be dense"
+
+
+def test_ambiguous_corpus_is_aggregate_matched() -> None:
+    """The label must not be inferable from operation counts.
+
+    The first version leaked exactly this way: malicious sessions contained
+    more injected events and a bag-of-features model could count them.
+    """
+    from collections import Counter
+
+    from pocketsec.stage1.labs.ambiguous_corpus import build_ambiguous_corpus
+
+    totals: dict[int, Counter[str]] = {0: Counter(), 1: Counter()}
+    sessions = {0: 0, 1: 0}
+    for scenario in build_ambiguous_corpus(count=90, seed=11):
+        sessions[scenario.label] += 1
+        for behaviour in scenario.behaviours:
+            totals[scenario.label][behaviour.operation] += 1
+
+    for operation in set(totals[0]) | set(totals[1]):
+        benign = totals[0][operation] / max(sessions[0], 1)
+        attack = totals[1][operation] / max(sessions[1], 1)
+        assert abs(benign - attack) < max(1.5, 0.15 * max(benign, attack)), (
+            f"operation {operation!r} differs across classes: "
+            f"{benign:.2f} vs {attack:.2f} per session"
+        )
+
+
+@pytest.mark.slow
+def test_lineage_pooling_helps_on_an_attribution_task(ambiguous) -> None:  # type: ignore[no-untyped-def]
+    """The largest single improvement measured in Stage 2.
+
+    A flat temporal pool cannot express "did any one lineage accumulate
+    dangerous capability". Pooling within each lineage and taking the worst
+    lineage asks that question directly.
+    """
+    _, with_pool = _train(ambiguous, use_lineage_pool=True)
+    _, without_pool = _train(ambiguous, use_lineage_pool=False)
+    assert with_pool > without_pool

@@ -96,9 +96,10 @@ _ROLE_POOL: tuple[tuple[str, tuple[tuple[str, dict[str, str]], ...]], ...] = (
     ("admin", _ADMIN_ROUTINE),
 )
 
-#: Legitimate credential handling that completes the full triad. Benign, and
-#: indistinguishable from exfiltration by security potential alone.
-_BENIGN_TRIAD_VARIANTS: tuple[tuple[tuple[str, dict[str, str]], ...], ...] = (
+#: Capability chains. Drawn by BOTH classes: a chain is neither benign nor
+#: malicious in itself. Three unrelated processes each doing one of these steps
+#: is ordinary administration; one process doing all three is exfiltration.
+_CHAIN_POOL: tuple[tuple[tuple[str, dict[str, str]], ...], ...] = (
     (  # credential rotation, synced to the corporate vault
         ("setuid", {"target_uid": "0"}),
         ("read", {"path": "/etc/shadow"}),
@@ -114,9 +115,7 @@ _BENIGN_TRIAD_VARIANTS: tuple[tuple[tuple[str, dict[str, str]], ...], ...] = (
     ),
 )
 
-#: Malicious chains. Same operations, same object classes, same capability
-#: outcome as the benign triads above.
-_ATTACK_VARIANTS: tuple[tuple[tuple[str, dict[str, str]], ...], ...] = (
+_MORE_CHAINS: tuple[tuple[tuple[str, dict[str, str]], ...], ...] = (
     (
         ("setuid", {"target_uid": "0"}),
         ("read", {"path": "/etc/shadow"}),
@@ -131,18 +130,7 @@ _ATTACK_VARIANTS: tuple[tuple[tuple[str, dict[str, str]], ...], ...] = (
     ),
 )
 
-#: Partial chains: only part of the capability set is reached. Deliberately
-#: close to the decision boundary — some are attacks that were interrupted.
-_SUBTLE_ATTACKS: tuple[tuple[tuple[str, dict[str, str]], ...], ...] = (
-    (
-        ("setuid", {"target_uid": "0"}),
-        ("read", {"path": "/etc/shadow"}),
-    ),
-    (
-        ("read", {"path": "/root/.ssh/id_rsa"}),
-        ("connect", {"raddr": "198.51.100.23", "rport": "443"}),
-    ),
-)
+_CHAIN_POOL = _CHAIN_POOL + _MORE_CHAINS
 
 
 def _make_roles(rng: random.Random, count: int) -> list[ActorRole]:
@@ -174,13 +162,28 @@ def _interleave(
     rng: random.Random,
     roles: list[ActorRole],
     length: int,
-    injected: list[tuple[ActorRole, tuple[tuple[str, dict[str, str]], ...]]],
+    chain: tuple[tuple[str, dict[str, str]], ...],
+    *,
+    single_lineage: bool,
 ) -> tuple[Behaviour, ...]:
-    """Weave every actor's routine together, then thread injected chains through.
+    """Weave the actors' routines together and thread one chain through them.
 
-    Injected stages are placed far apart on purpose: no window of any dilation
-    used by DTL-C (up to 32) spans two stages of the same chain, so the chain
-    can only be reconstructed by tracking the actor across the session.
+    **Aggregate-matched by construction.** Every session — benign and malicious
+    alike — receives exactly the same chain, the same operations, on the same
+    object classes, the same number of times. The *only* difference is
+    attribution:
+
+    * ``single_lineage=True``  one actor performs every stage (malicious)
+    * ``single_lineage=False`` the stages are spread across different actors
+      (benign: three unrelated processes that each did one ordinary thing)
+
+    A model that pools features over the session therefore sees two identical
+    distributions and cannot do better than the base rate. Separating them
+    requires tracking *which actor* did what, across a session in which the
+    stages are deliberately placed far apart. That is the per-lineage
+    long-range structure this corpus exists to test, and the earlier version
+    leaked it: malicious sessions simply contained more injected events, which
+    a bag-of-features model could count.
     """
     stream: list[Behaviour] = []
     cursors = {role.name: 0 for role in roles}
@@ -193,28 +196,33 @@ def _interleave(
             _behaviour(actor, operation, fields, rng.randrange(2, 90) * _SECOND_NS)
         )
 
-    for actor, chain in injected:
-        # Spread stages across the whole stream with a wide, jittered stride.
-        span = max(len(stream) - 2, len(chain) + 1)
-        stride = max(40, span // max(len(chain), 1))
-        position = rng.randrange(1, max(2, span - stride * (len(chain) - 1)))
-        for offset, (operation, fields) in enumerate(chain):
-            at = min(position + offset * stride + rng.randrange(-5, 6), len(stream))
-            stream.insert(
-                max(0, at),
-                _behaviour(actor, operation, fields, rng.randrange(5, 40) * _MINUTE_NS),
-            )
+    candidates = [r for r in roles if r.name != "admin"] or roles
+    owner = rng.choice(candidates)
+    # Stages are spread with a wide stride so no window of any dilation used by
+    # DTL-C (up to 32) spans two stages of the same chain.
+    span = max(len(stream) - 2, len(chain) + 1)
+    stride = max(20, span // max(len(chain), 1))
+    position = rng.randrange(1, max(2, span - stride * (len(chain) - 1)))
+
+    for offset, (operation, fields) in enumerate(chain):
+        actor = owner if single_lineage else rng.choice(candidates)
+        at = min(position + offset * stride + rng.randrange(-4, 5), len(stream))
+        stream.insert(
+            max(0, at),
+            _behaviour(actor, operation, fields, rng.randrange(5, 40) * _MINUTE_NS),
+        )
     return tuple(stream)
 
 
 def build_ambiguous_corpus(
     *, count: int, seed: int, split: str = "eval"
 ) -> tuple[Scenario, ...]:
-    """Build interleaved multi-actor sessions with overlapping class boundaries.
+    """Build interleaved multi-actor sessions distinguished only by attribution.
 
-    Roughly a third of sessions are malicious. Benign sessions frequently
-    include a legitimate triad, so security potential alone does not separate
-    them; malicious sessions sometimes include only a partial chain.
+    Roughly a third of sessions are malicious. Benign and malicious sessions are
+    matched on every aggregate statistic — same chain, same operations, same
+    counts — so the label depends solely on whether one lineage accumulated the
+    capability or several unrelated ones each contributed a piece.
     """
     rng = random.Random(seed)
     scenarios: list[Scenario] = []
@@ -222,33 +230,23 @@ def build_ambiguous_corpus(
     for index in range(count):
         roles = _make_roles(rng, rng.randrange(4, 6))
         length = rng.randrange(50, 90)
-        injected: list[tuple[ActorRole, tuple[tuple[str, dict[str, str]], ...]]] = []
-
         malicious = split != "train" and index % 3 == 0
-        # Benign near-miss: a legitimate lineage completes the full triad.
-        if rng.random() < (0.45 if not malicious else 0.3):
-            injected.append((rng.choice(roles), rng.choice(_BENIGN_TRIAD_VARIANTS)))
-
-        technique = None
-        unseen = False
-        if malicious:
-            subtle = index % 9 == 0
-            chain = (
-                rng.choice(_SUBTLE_ATTACKS) if subtle else rng.choice(_ATTACK_VARIANTS)
-            )
-            # The attacking lineage is a role with no business doing this.
-            candidates = [r for r in roles if r.name != "admin"] or roles
-            injected.append((rng.choice(candidates), chain))
-            technique = "partial-chain" if subtle else "interleaved-exfil"
-            unseen = subtle
+        # Both classes draw from the SAME chain pool. A chain is neither benign
+        # nor malicious in itself; only its attribution is.
+        chain = rng.choice(_CHAIN_POOL)
+        subtle = malicious and index % 9 == 0
+        if subtle:
+            chain = chain[: max(2, len(chain) - 2)]
 
         scenarios.append(
             Scenario(
                 f"amb-{split}-{index:04d}" + ("-attack" if malicious else ""),
-                _interleave(rng, roles, length, injected),
+                _interleave(rng, roles, length, chain, single_lineage=malicious),
                 1 if malicious else 0,
-                technique=technique,
-                unseen_technique=unseen,
+                technique=("partial-chain" if subtle else "single-lineage-exfil")
+                if malicious
+                else None,
+                unseen_technique=subtle,
             )
         )
     return tuple(scenarios)
