@@ -179,6 +179,23 @@ jobs:
           print(f"Stage 7 gate FAILED as recorded: {sorted(failed)}")
           PY
 
+      # Stage 9 fails by construction on G9.1 (Stage 8's hand-designed baseline is not
+      # consumable, ADR-0087) and on G9.4 (no 2 GB reference machine, ADR-0089). The report is
+      # kept; the build fails only if either passes. The full gate runs ~16 budgeted searches.
+      - name: Stage 9 acceptance gate (expected to fail; recorded, not hidden)
+        env:
+          PYTHONHASHSEED: "0"
+        run: |
+          python -m pocketsec.stage9.cli --json gate > stage9-gate.json || true
+          python - <<'PY'
+          import json, sys
+          report = json.load(open("stage9-gate.json"))
+          failed = {c["id"] for c in report["checks"] if not c["passed"]}
+          if not {"G9.1", "G9.4"} <= failed:
+              sys.exit("G9.1 or G9.4 passed; see docs/stage-9-spec.md §6.1")
+          print(f"Stage 9 gate FAILED as recorded: {sorted(failed)}")
+          PY
+
       - name: Smoke benchmark (H0 baseline through the harness)
         env:
           PYTHONHASHSEED: "0"
