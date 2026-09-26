@@ -179,6 +179,23 @@ jobs:
           print(f"Stage 7 gate FAILED as recorded: {sorted(failed)}")
           PY
 
+      # Stage 8's gate FAILS by construction on G8.12 (baselines on a synthetic, author-
+      # confounded corpus; docs/stage-8-spec.md §6.1). The report is kept; the build fails only
+      # if G8.12 passes. The full gate runs ~50 budgeted discovery runs.
+      - name: Stage 8 acceptance gate (expected to fail; recorded, not hidden)
+        env:
+          PYTHONHASHSEED: "0"
+        run: |
+          python -m pocketsec.stage8.cli --json gate > stage8-gate.json || true
+          python - <<'PY'
+          import json, sys
+          report = json.load(open("stage8-gate.json"))
+          failed = {c["id"] for c in report["checks"] if not c["passed"]}
+          if "G8.12" not in failed:
+              sys.exit("G8.12 passed on synthetic data; see docs/stage-8-spec.md §6.1")
+          print(f"Stage 8 gate FAILED as recorded: {sorted(failed)}")
+          PY
+
       # Stage 9 fails by construction on G9.1 (Stage 8's hand-designed baseline is not
       # consumable, ADR-0087) and on G9.4 (no 2 GB reference machine, ADR-0089). The report is
       # kept; the build fails only if either passes. The full gate runs ~16 budgeted searches.

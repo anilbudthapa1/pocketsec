@@ -30,6 +30,7 @@ pocketsec-stage4 = "pocketsec.stage4.cli:main"
 pocketsec-stage5 = "pocketsec.stage5.cli:main"
 pocketsec-stage6 = "pocketsec.stage6.cli:main"
 pocketsec-stage7 = "pocketsec.stage7.cli:main"
+pocketsec-stage8 = "pocketsec.stage8.cli:main"
 pocketsec-stage9 = "pocketsec.stage9.cli:main"
 
 [tool.setuptools.packages.find]
