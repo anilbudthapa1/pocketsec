@@ -145,6 +145,23 @@ jobs:
           print(f"Stage 5 gate FAILED as recorded: {sorted(failed)}")
           PY
 
+      # Stage 6's gate FAILS by construction on G6.13: "survives ablation" needs a
+      # non-synthetic endurance run (docs/stage-6-spec.md §6.1). The gate runs, its report
+      # is kept, and the build fails only if G6.13 stops failing on synthetic data.
+      - name: Stage 6 acceptance gate (expected to fail; recorded, not hidden)
+        env:
+          PYTHONHASHSEED: "0"
+        run: |
+          python -m pocketsec.stage6.cli --json gate > stage6-gate.json || true
+          python - <<'PY'
+          import json, sys
+          report = json.load(open("stage6-gate.json"))
+          failed = {c["id"] for c in report["checks"] if not c["passed"]}
+          if "G6.13" not in failed:
+              sys.exit("G6.13 passed on a synthetic corpus; see docs/stage-6-spec.md §6.1")
+          print(f"Stage 6 gate FAILED as recorded: {sorted(failed)}")
+          PY
+
       - name: Smoke benchmark (H0 baseline through the harness)
         env:
           PYTHONHASHSEED: "0"
