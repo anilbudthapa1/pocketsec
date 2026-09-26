@@ -455,7 +455,10 @@ def test_memory_does_not_carry_the_retracted_playbook_verdict_uncorrected() -> N
     history, so the test asserts the correction sits in the same Stage 5 section and
     cites the two ledger rows that carry the retraction.
     """
-    text = (REPO_ROOT / "planning" / "MEMORY.md").read_text(encoding="utf-8")
+    memory = REPO_ROOT / "planning" / "MEMORY.md"
+    if not memory.exists():
+        pytest.skip("planning/ is a local session ledger and is not distributed with the repository")
+    text = memory.read_text(encoding="utf-8")
     start = text.index("## Durable Stage 5 facts")
     end = text.find("\n## ", start + 1)
     section = text[start:] if end == -1 else text[start:end]

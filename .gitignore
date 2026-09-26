@@ -24,3 +24,6 @@ models/compiled/*
 # Tooling runtime state, not project content
 .newcrm/
 .wf/
+
+# Local session ledgers and phase checklists, not distributed
+planning/
