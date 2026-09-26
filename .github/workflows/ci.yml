@@ -162,6 +162,23 @@ jobs:
           print(f"Stage 6 gate FAILED as recorded: {sorted(failed)}")
           PY
 
+      # Stage 7's gate FAILS by construction on G7.11 ("survives ablation" needs a
+      # non-synthetic fleet; docs/stage-7-spec.md §6.1) and on G7.8 (Stage 6 admits no
+      # foreign capsule, B7-1). The report is kept; the build fails only if either passes.
+      - name: Stage 7 acceptance gate (expected to fail; recorded, not hidden)
+        env:
+          PYTHONHASHSEED: "0"
+        run: |
+          python -m pocketsec.stage7.cli --json gate > stage7-gate.json || true
+          python - <<'PY'
+          import json, sys
+          report = json.load(open("stage7-gate.json"))
+          failed = {c["id"] for c in report["checks"] if not c["passed"]}
+          if not {"G7.8", "G7.11"} <= failed:
+              sys.exit("G7.8 or G7.11 passed on synthetic data; see docs/stage-7-spec.md §6.1")
+          print(f"Stage 7 gate FAILED as recorded: {sorted(failed)}")
+          PY
+
       - name: Smoke benchmark (H0 baseline through the harness)
         env:
           PYTHONHASHSEED: "0"
