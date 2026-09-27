@@ -32,6 +32,7 @@ pocketsec-stage6 = "pocketsec.stage6.cli:main"
 pocketsec-stage7 = "pocketsec.stage7.cli:main"
 pocketsec-stage8 = "pocketsec.stage8.cli:main"
 pocketsec-stage9 = "pocketsec.stage9.cli:main"
+pocketsec-chat = "pocketsec.assistant.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["pocketsec*"]
